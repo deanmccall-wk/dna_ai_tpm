@@ -25,6 +25,7 @@ from core.tpm_workflow import (
 )
 from safety.snapshot import snapshot_from_keys
 from core.rice_scoring import calculate_rice, format_rice_comment
+from core.asset_lookup import lookup_assets_for_ticket, format_asset_context
 
 from project_root import PROJECT_ROOT
 
@@ -74,6 +75,14 @@ def plan_auto_ticket(jira: JiraClient, ticket: dict) -> dict:
     rice = calculate_rice(fields)
     print(f"  RICE Score: {rice['rice_score']} ({rice['priority_bucket']}) "
           f"[R={rice['reach']} I={rice['impact']} C={int(rice['confidence']*100)}% E={rice['effort']}]")
+
+    # Asset context from Atlan and GitHub
+    try:
+        asset_ctx = lookup_assets_for_ticket(fields, use_github=False)
+        if asset_ctx.get("asset_names"):
+            print(format_asset_context(asset_ctx))
+    except Exception:
+        asset_ctx = {}
 
     # Propose a better summary if current one is generic
     proposed_summary = propose_summary(fields)
@@ -165,6 +174,14 @@ def plan_enrich_ticket(jira: JiraClient, ticket: dict) -> dict:
     fields = full.get("fields", {})
     desc = (fields.get("description") or "")[:300]
     print(f"  Description: {desc}")
+
+    # Asset context from Atlan
+    try:
+        asset_ctx = lookup_assets_for_ticket(fields, use_github=False)
+        if asset_ctx.get("asset_names"):
+            print(format_asset_context(asset_ctx))
+    except Exception:
+        pass
 
     # Propose a better summary if current one is generic
     proposed_summary = propose_summary(fields)

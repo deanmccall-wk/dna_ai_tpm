@@ -59,16 +59,32 @@ The org_id is in the ticket description, typically in a `{code}` block:
 Org ID: e4e54d60-463d-4b7d-ab5d-9f6a8a426a5c
 ```
 
-### Automated Verification
+### Step 3a — Identify Workspaces (run first, before deletion actions)
 
 ```bash
 source .venv/bin/activate
-python verify_deletion.py DATA-2439              # Run queries, print results
-python verify_deletion.py DATA-2439 --post       # Run and post results to Jira
-python verify_deletion.py DATA-2439 --post --close   # Run, post, and close
+python -m deletion.verify_deletion identify DATA-2487              # List workspaces
+python -m deletion.verify_deletion identify DATA-2487 --post       # List and post to Jira
+python -m deletion.verify_deletion identify DATA-2487 --org-id <uuid>  # Manual org_id
 ```
 
-The script runs all queries against both Snowflake and Redshift and formats a combined report.
+This queries Snowflake for all workspaces in the org and posts a confirmation comment listing each workspace ID, name, and current deleted/active status. Use this to confirm scope before deletion actions begin.
+
+### Step 3b — Verify Redaction (run after deletion actions complete)
+
+```bash
+python -m deletion.verify_deletion verify DATA-2487               # Check redaction status
+python -m deletion.verify_deletion verify DATA-2487 --post        # Check and post to Jira
+python -m deletion.verify_deletion verify DATA-2487 --post --close   # Check, post, and close
+```
+
+The script checks each workspace for:
+- `WORKSPACE_NAME = 'REDACTED'` (name has been scrubbed)
+- `DELETED_FLAG = TRUE`
+- `ACTIVE_FLAG = FALSE`
+- A record exists in `WORKIVA_ORG_DELETES` with a `DELETED_DATE`
+
+If all workspaces pass, the verification is complete. If any workspace is not yet redacted, the script reports which ones still need action.
 
 ### Manual Verification (if needed)
 
