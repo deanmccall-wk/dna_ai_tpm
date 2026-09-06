@@ -3,9 +3,9 @@
 
 import json
 import sys
-from config import load_settings
-from jira_client import JiraClient
-from confluence_client import ConfluenceClient
+from clients.config import load_settings
+from clients.jira_client import JiraClient
+from clients.confluence_client import ConfluenceClient
 
 
 def check(label: str, fn):

@@ -10,11 +10,13 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from config import load_settings
-from jira_client import JiraClient
+from clients.config import load_settings
+from clients.jira_client import JiraClient
 
 
-SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "snapshots")
+from project_root import PROJECT_ROOT
+
+SNAPSHOT_DIR = os.path.join(PROJECT_ROOT, "snapshots")
 
 
 def take_snapshot(jira: JiraClient, keys: list[str]) -> dict:

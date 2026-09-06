@@ -10,13 +10,15 @@ try:
 except ImportError:
     HAS_SNOWFLAKE = False
 
-from config import load_settings
+from clients.config import load_settings
 
 DIRECTOR_LEVELS = {"D", "Director", "Senior Director", "VP", "Vice President",
                    "Senior Vice President", "Executive Vice President",
                    "CFO", "CEO", "CLO"}
 
-CACHE_PATH = os.path.join(os.path.dirname(__file__), "stakeholder_cache.json")
+from project_root import PROJECT_ROOT
+
+CACHE_PATH = os.path.join(PROJECT_ROOT, "stakeholder_cache.json")
 
 
 def _get_snowflake_connection():

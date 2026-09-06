@@ -14,19 +14,21 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 
-from config import load_settings
-from jira_client import JiraClient
-from snapshot import snapshot_from_keys
-from tpm_workflow import (
+from clients.config import load_settings
+from clients.jira_client import JiraClient
+from safety.snapshot import snapshot_from_keys
+from core.tpm_workflow import (
     CF_TEAM, CF_STAKEHOLDER, CF_EPIC_LINK, CF_EPIC_NAME,
     VALID_TEAMS, VALID_COMPONENTS, COMPONENT_KEYWORD_MAP,
     check_dna_compliance,
 )
-from stakeholder_lookup import build_stakeholder_cache, load_cache, lookup_stakeholder
+from core.stakeholder_lookup import build_stakeholder_cache, load_cache, lookup_stakeholder
 
-PLANS_DIR = os.path.join(os.path.dirname(__file__), "plans")
-CHANGES_DIR = os.path.join(os.path.dirname(__file__), "changes")
-AUDIT_PATH = os.path.join(os.path.dirname(__file__), "dna_audit.json")
+from project_root import PROJECT_ROOT
+
+PLANS_DIR = os.path.join(PROJECT_ROOT, "plans")
+CHANGES_DIR = os.path.join(PROJECT_ROOT, "changes")
+AUDIT_PATH = os.path.join(PROJECT_ROOT, "dna_audit.json")
 
 FIELDS = [
     "summary", "issuetype", "status", "priority", "assignee", "reporter",

@@ -14,13 +14,15 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-from config import load_settings
-from jira_client import JiraClient
-from snapshot import snapshot_from_keys
-from tpm_workflow import CF_TEAM, VALID_TEAMS
+from clients.config import load_settings
+from clients.jira_client import JiraClient
+from safety.snapshot import snapshot_from_keys
+from core.tpm_workflow import CF_TEAM, VALID_TEAMS
 
-PLANS_DIR = os.path.join(os.path.dirname(__file__), "plans")
-CHANGES_DIR = os.path.join(os.path.dirname(__file__), "changes")
+from project_root import PROJECT_ROOT
+
+PLANS_DIR = os.path.join(PROJECT_ROOT, "plans")
+CHANGES_DIR = os.path.join(PROJECT_ROOT, "changes")
 
 FIELDS = [
     "summary", "issuetype", "status", "priority", "updated", "assignee",
@@ -279,7 +281,7 @@ def main():
     elif args.command == "report":
         stale = fetch_stale(jira, args.min_days)
         print_summary(stale, args.min_days)
-        report_path = os.path.join(os.path.dirname(__file__), "stale_report.json")
+        report_path = os.path.join(PROJECT_ROOT, "stale_report.json")
         with open(report_path, "w") as f:
             json.dump({"min_days": args.min_days, "total": len(stale),
                         "tiers": dict(Counter(s["tier"] for s in stale)), "tickets": stale}, f, indent=2)

@@ -8,7 +8,7 @@ RICE = (Reach x Impact x Confidence) / Effort
 - Effort: Estimated work required
 """
 
-from tpm_workflow import (
+from core.tpm_workflow import (
     CF_SERVICE_TYPE, CF_TEAMS_IMPACTED, CF_BIZ_PRIORITY,
     CF_PRIMARY_SOLUTION, CF_EXEC_SPONSOR, CF_MILESTONE,
     SERVICE_TYPES, _get_field_value,

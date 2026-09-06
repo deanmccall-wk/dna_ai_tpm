@@ -12,9 +12,9 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from config import load_settings
-from jira_client import JiraClient
-from tpm_workflow import (
+from clients.config import load_settings
+from clients.jira_client import JiraClient
+from core.tpm_workflow import (
     SLA_COMMENTS, BIZ_PRIORITY_TO_JIRA, SERVICE_TYPE_TIERS, SERVICE_TYPES,
     CF_SERVICE_TYPE, CF_BIZ_PRIORITY,
     assess_data_ticket, post_sla_comment, build_dna_payload,
@@ -23,12 +23,14 @@ from tpm_workflow import (
     prepare_move_instructions, set_dna_fields,
     is_deletion_ticket, DELETION_RUNBOOK_URL,
 )
-from snapshot import snapshot_from_keys
-from rice_scoring import calculate_rice, format_rice_comment
+from safety.snapshot import snapshot_from_keys
+from core.rice_scoring import calculate_rice, format_rice_comment
 
-PLANS_DIR = os.path.join(os.path.dirname(__file__), "plans")
-CHANGES_DIR = os.path.join(os.path.dirname(__file__), "changes")
-AUDIT_PATH = os.path.join(os.path.dirname(__file__), "data_audit.json")
+from project_root import PROJECT_ROOT
+
+PLANS_DIR = os.path.join(PROJECT_ROOT, "plans")
+CHANGES_DIR = os.path.join(PROJECT_ROOT, "changes")
+AUDIT_PATH = os.path.join(PROJECT_ROOT, "data_audit.json")
 
 
 def load_audit() -> dict:

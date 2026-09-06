@@ -12,7 +12,7 @@ class Settings:
 
 
 def load_settings(env_path: str = None) -> Settings:
-    load_dotenv(env_path or os.path.join(os.path.dirname(__file__), ".env"))
+    load_dotenv(env_path or os.path.join(os.path.dirname(__file__), "..", ".env"))
 
     required = {
         "JIRA_BASE_URL": os.getenv("JIRA_BASE_URL"),

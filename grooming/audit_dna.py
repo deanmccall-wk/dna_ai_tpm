@@ -7,9 +7,10 @@ import os
 import sys
 from collections import Counter
 
-from config import load_settings
-from jira_client import JiraClient
-from tpm_workflow import (
+from clients.config import load_settings
+from clients.jira_client import JiraClient
+from project_root import PROJECT_ROOT
+from core.tpm_workflow import (
     CF_TEAM, CF_STAKEHOLDER, CF_EPIC_NAME, CF_EPIC_LINK,
     VALID_TEAMS, VALID_COMPONENTS, check_dna_compliance,
 )
@@ -88,7 +89,7 @@ def main():
     print(f"  Issues to repair:      {len(non_epics)}")
 
     # Save CSV
-    csv_path = os.path.join(os.path.dirname(__file__), "dna_audit.csv")
+    csv_path = os.path.join(PROJECT_ROOT, "dna_audit.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
         violation_fields = ["missing_team", "invalid_team", "missing_stakeholder",
@@ -102,7 +103,7 @@ def main():
     print(f"\nCSV saved: {csv_path}")
 
     # Save JSON with repair queue
-    json_path = os.path.join(os.path.dirname(__file__), "dna_audit.json")
+    json_path = os.path.join(PROJECT_ROOT, "dna_audit.json")
     with open(json_path, "w") as f:
         json.dump({
             "total": len(results),

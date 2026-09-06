@@ -1,4 +1,4 @@
-from jira_client import JiraClient
+from clients.jira_client import JiraClient
 
 # ---------------------------------------------------------------------------
 # SLA / Priority

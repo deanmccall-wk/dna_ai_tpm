@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Publish the Data Deletion Runbook to Confluence."""
-from config import load_settings
-from confluence_client import ConfluenceClient
+from clients.config import load_settings
+from clients.confluence_client import ConfluenceClient
 
 s = load_settings()
 conf = ConfluenceClient(s.confluence_base_url, s.confluence_pat)

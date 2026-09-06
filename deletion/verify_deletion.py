@@ -19,8 +19,8 @@ import re
 import sys
 from datetime import datetime, timezone
 
-from config import load_settings
-from jira_client import JiraClient
+from clients.config import load_settings
+from clients.jira_client import JiraClient
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@ def main():
     args = parser.parse_args()
 
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
     settings = load_settings()
     jira = JiraClient(settings.jira_base_url, settings.jira_pat)
@@ -312,7 +312,7 @@ def main():
         )
         jira.add_comment(args.ticket, close_comment)
 
-        from tpm_workflow import close_data_ticket
+        from core.tpm_workflow import close_data_ticket
         try:
             close_data_ticket(jira, args.ticket)
             print(f"Ticket {args.ticket} closed.")

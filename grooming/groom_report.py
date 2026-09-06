@@ -7,7 +7,9 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-OUTPUT_DIR = os.path.dirname(__file__)
+from project_root import PROJECT_ROOT
+
+OUTPUT_DIR = PROJECT_ROOT
 
 
 def load_json(path: str) -> dict:

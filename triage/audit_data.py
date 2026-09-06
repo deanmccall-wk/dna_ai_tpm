@@ -6,9 +6,9 @@ import os
 import re
 import sys
 
-from config import load_settings
-from jira_client import JiraClient
-from tpm_workflow import (
+from clients.config import load_settings
+from clients.jira_client import JiraClient
+from core.tpm_workflow import (
     CF_SERVICE_TYPE, CF_TEAMS_IMPACTED, CF_BIZ_PRIORITY,
     CF_PRIMARY_SOLUTION, CF_EXEC_SPONSOR, CF_MILESTONE, CF_REQUEST_TYPE,
     assess_data_ticket, classify_conformance,
@@ -100,7 +100,8 @@ def main():
         print(f"    {itype}: {len(items)} ({auto} auto, {len(items)-auto} enrich)")
 
     # Save JSON
-    output_path = os.path.join(os.path.dirname(__file__), "data_audit.json")
+    from project_root import PROJECT_ROOT
+    output_path = os.path.join(PROJECT_ROOT, "data_audit.json")
     with open(output_path, "w") as f:
         json.dump({"total": len(results), "auto": auto_count, "enrich": enrich_count, "tickets": results}, f, indent=2)
     print(f"\nSaved: {output_path}")

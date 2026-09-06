@@ -6,9 +6,9 @@ import json
 import os
 import sys
 
-from config import load_settings
-from jira_client import JiraClient
-from snapshot import SNAPSHOT_DIR, get_latest_snapshot
+from clients.config import load_settings
+from clients.jira_client import JiraClient
+from safety.snapshot import SNAPSHOT_DIR, get_latest_snapshot
 
 
 def load_json(path: str) -> dict:
