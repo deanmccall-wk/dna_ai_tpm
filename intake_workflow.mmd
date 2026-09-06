@@ -1,0 +1,25 @@
+flowchart TD
+    Intake["Ticket arrives in DATA"]
+    Classify{"Classify service type"}
+    
+    Classify -->|"Access / Permissions"| Tier1["Tier 1: Resolve at desk"]
+    Classify -->|"Data Question"| Tier1
+    Classify -->|"Data Deletion"| Tier2{"Needs engineering?"}
+    Classify -->|"Bug / Break-Fix"| Tier2
+    Classify -->|"BI / Reporting"| Tier2
+    Classify -->|"New Ingestion"| Tier3["Tier 3: Full intake"]
+    Classify -->|"New Feature"| Tier3
+    Classify -->|"Migration"| Tier3
+    
+    Tier1 --> Resolve["Resolve + close DATA"]
+    
+    Tier2 -->|No| Resolve
+    Tier2 -->|Yes| Tier3
+    
+    Tier3 --> FiveCriteria["Check 5 criteria"]
+    FiveCriteria -->|Complete| CreateDNA["Create DNA ticket + cross-ref"]
+    FiveCriteria -->|Missing| RequestInfo["Request info from submitter"]
+    RequestInfo --> FiveCriteria
+    
+    CreateDNA --> AssignPriority["Set priority + SLA"]
+    AssignPriority --> CloseDATA["Close DATA ticket"]

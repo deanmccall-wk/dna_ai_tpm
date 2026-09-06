@@ -40,6 +40,29 @@ class JiraClient:
     def create_issue(self, payload: dict) -> dict:
         return self._post("/issue", json=payload)
 
+    def update_issue(self, key: str, fields: dict) -> None:
+        """Update fields on an existing issue via PUT."""
+        resp = self.session.put(
+            self._url(f"/issue/{key}"),
+            json={"fields": fields},
+        )
+        resp.raise_for_status()
+
+    def move_issue(self, key: str, target_project: str, issue_type: str = None) -> None:
+        """Move an issue to another project. Optionally change issue type."""
+        fields = {"project": {"key": target_project}}
+        if issue_type:
+            fields["issuetype"] = {"name": issue_type}
+        self.update_issue(key, fields)
+
+    def get_issue_full(self, key: str) -> dict:
+        """Get all fields for a ticket (no field filter). Used for snapshots."""
+        return self._get(f"/issue/{key}")
+
+    def get_issue_changelog(self, key: str) -> dict:
+        """Get issue with changelog expanded."""
+        return self._get(f"/issue/{key}", params={"expand": "changelog"})
+
     # -- Comments --
 
     def add_comment(self, key: str, body: str) -> dict:
@@ -59,11 +82,23 @@ class JiraClient:
 
     # -- Search --
 
-    def search(self, jql: str, fields: list[str] = None, max_results: int = 50) -> dict:
-        payload = {"jql": jql, "maxResults": max_results}
+    def search(self, jql: str, fields: list[str] = None, max_results: int = 50, start_at: int = 0) -> dict:
+        payload = {"jql": jql, "maxResults": max_results, "startAt": start_at}
         if fields:
             payload["fields"] = fields
         return self._post("/search", json=payload)
+
+    def search_all(self, jql: str, fields: list[str] = None, page_size: int = 200) -> list[dict]:
+        """Paginate through all results for a JQL query."""
+        all_issues = []
+        start_at = 0
+        while True:
+            result = self.search(jql, fields=fields, max_results=page_size, start_at=start_at)
+            all_issues.extend(result["issues"])
+            start_at += len(result["issues"])
+            if start_at >= result["total"]:
+                break
+        return all_issues
 
     # -- Create metadata --
 
