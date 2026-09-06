@@ -1,0 +1,86 @@
+%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '13px'}}}%%
+sequenceDiagram
+    participant TPM as TPM
+    participant CoCo as Cortex Code + Tooling
+    participant Jira as Jira
+    participant SF as Snowflake
+    participant Atlan as Atlan
+    participant QS as QuickSight
+
+    TPM->>CoCo: Select ticket for triage
+    
+    rect rgb(240, 248, 255)
+    Note over CoCo: Step 1: Snapshot
+    CoCo->>Jira: Fetch full ticket state
+    Jira-->>CoCo: Ticket fields + comments
+    CoCo->>CoCo: Save to snapshots/
+    end
+
+    rect rgb(240, 248, 255)
+    Note over CoCo: Step 2: Assess
+    CoCo->>CoCo: Run _assess.py
+    CoCo->>SF: Check asset availability
+    SF-->>CoCo: Column/table metadata
+    CoCo->>Atlan: Search referenced assets
+    Atlan-->>CoCo: Asset links + lineage
+    CoCo->>CoCo: Calculate RICE, conformance, team
+    end
+
+    rect rgb(240, 248, 255)
+    Note over CoCo: Step 3: Investigate
+    CoCo->>Jira: Search related tickets (JQL)
+    Jira-->>CoCo: Duplicates + prior work
+    CoCo->>SF: Reporter lookup (dim_workers)
+    SF-->>CoCo: Role, department, active status
+    CoCo->>Atlan: Asset lineage traversal
+    Atlan-->>CoCo: Upstream/downstream objects
+    opt QuickSight Access Ticket
+        CoCo->>CoCo: Check quicksight_users.csv
+        CoCo->>QS: Describe dashboard permissions
+        QS-->>CoCo: Dashboard owners
+    end
+    opt RBAC / Access Ticket
+        CoCo->>SF: SHOW GRANTS chain analysis
+        SF-->>CoCo: Role hierarchy
+    end
+    end
+
+    rect rgb(255, 255, 224)
+    Note over TPM: Step 4: Review Gate
+    CoCo->>TPM: Present findings + recommendation
+    TPM->>TPM: Review and decide action
+    end
+
+    alt TPM requests changes
+        TPM->>CoCo: Request additional investigation
+        CoCo->>CoCo: Re-investigate
+        CoCo->>TPM: Updated findings
+    end
+
+    TPM->>CoCo: Confirm action
+
+    rect rgb(240, 248, 255)
+    Note over CoCo: Step 5: Post Triage
+    CoCo->>Jira: Update summary + priority
+    CoCo->>Jira: Post triage comment (10-point standard)
+    CoCo->>Jira: Post estimated RICE (separate comment)
+    CoCo->>Jira: Link related tickets
+    end
+
+    rect rgb(255, 248, 240)
+    Note over TPM,Jira: Step 6: Route
+    alt Close
+        CoCo->>Jira: Post close message + transition
+    else Waiting for Customer
+        CoCo->>Jira: Transition to Waiting for Customer
+    else Assign in DATA
+        CoCo->>Jira: Set assignee
+    else Handoff to DNA
+        CoCo->>Jira: Post handoff comment
+        TPM->>Jira: Manually move ticket (DATA to DNA)
+        TPM->>CoCo: Provide new DNA key
+        CoCo->>Jira: Set Team, Component, Assignee on DNA key
+    end
+    end
+
+    TPM->>CoCo: Direct to next ticket

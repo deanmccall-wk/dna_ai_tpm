@@ -1,109 +1,358 @@
-# DnA Triage Runbook — Data Operations
+# DnA Triage Runbook -- Data Operations
 
 ## Overview
 
-This runbook describes the daily triage process for incoming Data & Analytics requests. Tickets arrive in the **DATA** Jira project (service desk) and are either resolved at the desk or moved to the **DNA** project (engineering).
+This runbook describes the triage process for incoming Data & Analytics requests. Tickets arrive in the **DATA** Jira project (JSM service desk) and are either resolved at the desk, moved to **Waiting for Customer**, or moved to the **DNA** project (engineering execution).
 
-**Who:** Data Operations team
+**Who:** TPM (Data & Analytics) with Cortex Code assistance
 **When:** Daily (check the queue each morning)
-**Tools:** Python scripts in `~/Documents/dna_ai_tpm/`
+**Tools:** Python scripts in `~/Documents/dna_ai_tpm/`, Cortex Code, Snowflake, Atlan, AWS CLI
+
+## Process Rules
+
+These rules are non-negotiable. They exist because violations during the initial triage effort caused irreversible damage (permanently closed tickets that should have been assigned).
+
+1. **Never close or transition a ticket without explicit TPM confirmation.** JSM tickets cannot be reopened once Closed.
+2. **Always create a snapshot before any changes.** No exceptions.
+3. **Never auto-advance to the next ticket.** Present findings, wait for direction.
+4. **Self-service is always preferred** over data exports or routing to a team for a data pull.
+5. **Verify the ticket key before posting.** Confirm you are commenting on the correct ticket.
+6. **Review technical statements before posting.** Do not post information you are uncertain about.
+7. **Estimated RICE score goes in a separate comment**, not in the public triage comment.
+8. **Update the summary** from "General Request" to a descriptive title on every ticket.
+9. **Update the priority** to match the calculated recommendation.
+10. **Link related tickets** when found during investigation.
 
 ## Setup (First Time)
 
 ```bash
 cd ~/Documents/dna_ai_tpm
 cp .env.example .env
-# Edit .env with your Jira and Confluence PATs
+# Edit .env with your Jira PAT, Confluence PAT, Atlan API token, Redshift creds, GitHub PAT
+# Ensure ATLAN_BASE_URL=https://workiva.atlan.com is set
 source .venv/bin/activate
-python verify_connection.py
+PYTHONPATH=$PWD python scripts/verify_connection.py
 ```
 
-## Daily Triage
-
-### 0. Deletion Tickets
+## Deletion Tickets
 
 Data deletion tickets (from SaaS Ops) are automatically detected during triage and routed to the deletion process. They skip standard triage.
 
-- **Runbook:** [Customer Data Deletion — Data Operations Runbook](https://wiki.atl.workiva.net/spaces/BT/pages/530849217)
-- **Automation:** `python verify_deletion.py <ticket_key> --post --close`
+- **Runbook:** [Customer Data Deletion -- Data Operations Runbook](https://wiki.atl.workiva.net/spaces/BT/pages/530849217)
+- **Automation:** `PYTHONPATH=$PWD python deletion/verify_deletion.py <ticket_key>`
 - **Indicators:** Summary contains "Data Deletion", "Delete End Client Data", "Certificate of Destruction"
 
-### 1. Check the Queue
+---
+
+## AI-Assisted Triage (Primary Workflow)
+
+This is the primary triage workflow. Each ticket is triaged individually with investigation and TPM review. For bulk cleanup of stale queues, see "Batch Triage" below.
+
+### Workflow Overview
+
+```
+Select ticket
+    |
+    v
+Step 1: SNAPSHOT --- mandatory, no exceptions
+    |
+    v
+Step 2: ASSESS --- run _assess.py for conformance, RICE, team, assets
+    |
+    v
+Step 3: INVESTIGATE --- Snowflake, Atlan, QuickSight, related tickets
+    |
+    v
+Step 4: PRESENT FINDINGS --- STOP. Wait for TPM review.
+    |
+    v
+    TPM reviews and decides action
+    |
+    v
+Step 5: POST TRIAGE --- comment + RICE (separate), update summary + priority
+    |
+    v
+Step 6: ROUTE --- close, assign, Waiting for Customer, or handoff to DNA
+    |
+    v
+    STOP --- wait for TPM to direct to next ticket
+```
+
+### Step 1: Snapshot
+
+Before any changes, create a pre-triage snapshot:
 
 ```bash
+cd ~/Documents/dna_ai_tpm
 source .venv/bin/activate
-python audit_data.py
+PYTHONPATH=$PWD python safety/snapshot.py --keys DATA-XXXX --label pre_triage
 ```
 
-This fetches all open DATA tickets and classifies them into two paths:
+This saves the full ticket state to `snapshots/DATA-XXXX/` for rollback if needed.
 
-- **AUTO** (4-5/5 form fields present) — the requester used the portal form. These can be triaged quickly.
-- **ENRICH** (0-3/5 form fields present) — the ticket was created directly in Jira or the form was only partially filled. These need manual attention.
+### Step 2: Assess
 
-The output shows each ticket with its conformance score, inferred priority, service type, and whether a DNA cross-reference already exists.
-
-### 2. Triage the AUTO Path
+Run the assessment script to get conformance score, RICE, team recommendation, and asset references:
 
 ```bash
-python triage_data.py plan --path auto
+PYTHONPATH=$PWD python scripts/_assess.py DATA-XXXX
 ```
 
-For each conforming ticket you will see:
+Output includes:
+- Conformance score (0-5) and path (AUTO or ENRICH)
+- RICE score with Reach/Impact/Confidence/Effort breakdown
+- Recommended team and Jira field values
+- Asset references found in the description with Atlan links
+- Existing comments and DNA cross-references
+
+### Step 3: Investigate
+
+Follow the Standard Investigation Sequence (see section below). At minimum:
+
+1. **Related ticket search** -- check for duplicates and prior work
+2. **Reporter lookup** -- check `dim_workers` for role, department, active status
+3. **Asset search** -- verify Snowflake objects exist, get Atlan links
+
+Additional investigation depends on ticket type (see Investigation Patterns).
+
+### Step 4: Present Findings (STOP)
+
+Present the triage assessment to the TPM. Include:
+- Request summary
+- Key investigation findings
+- Recommended action (close, assign, Waiting for Customer, handoff)
+- Any questions or ambiguities
+
+**Do not proceed until the TPM confirms the action.**
+
+### Step 5: Post Triage
+
+After TPM confirmation, post the triage comment following the 10-Point Standard (see section below). In a separate action:
+- Post the Estimated RICE score as a separate comment
+- Update the summary from "General Request" to a descriptive title
+- Update the priority to match the calculated recommendation
+- Link any related tickets found during investigation
+
+### Step 6: Route
+
+Based on TPM decision:
+
+| Action | Steps |
+|--------|-------|
+| **Close** | Post closing comment with polite reopen message. Transition: Cancel -> Close (or Done if from Open). |
+| **Waiting for Customer** | Post triage with specific questions. Transition to Waiting for Customer. |
+| **Assign in DATA** | Set assignee. Leave in current status. |
+| **Handoff to DNA** | Post handoff comment. TPM manually moves in Jira UI. Then set Team, Component, Assignee on new DNA key via API. |
+
+**After routing: STOP. Do not proceed to the next ticket until the TPM directs.**
+
+---
+
+## Mandatory Checklists
+
+### Pre-Change Checklist
+
+Complete before any Jira modification:
+
+- [ ] Snapshot created (`safety/snapshot.py --keys <KEY> --label pre_triage`)
+- [ ] `_assess.py` run (conformance, RICE, team recommendation, asset lookup)
+- [ ] Investigation complete (Snowflake, Atlan, related tickets, employee/access check as applicable)
+- [ ] Findings presented to TPM
+- [ ] TPM has confirmed the action to take
+
+### Pre-Post Checklist
+
+Complete before posting triage comment:
+
+- [ ] Correct ticket key verified (not posting to wrong ticket)
+- [ ] Summary updated from "General Request" to descriptive title
+- [ ] Priority updated to match calculated recommendation
+- [ ] Triage comment includes all applicable items from the 10-Point Standard
+- [ ] Estimated RICE posted as a SEPARATE comment (not in the public triage)
+- [ ] Atlan links verified (correct Snowflake objects, not Redshift)
+- [ ] No incorrect or uncertain technical statements
+- [ ] Related tickets linked
+
+### Post-Action Checklist
+
+Complete before moving to next ticket:
+
+- [ ] Ticket status is correct (Waiting for Customer, assigned, or confirmed for close)
+- [ ] If moved to DNA: Team, Component, and Assignee are set on the DNA ticket
+- [ ] STOP -- do not proceed to next ticket until TPM directs
+
+---
+
+## 10-Point Triage Comment Standard
+
+Every triage comment must include all applicable items:
+
+1. **Request summary** -- clear description of what is being asked
+2. **Conformance score** -- X/5 (AUTO or ENRICH) and SLA tier
+3. **Estimated RICE score** -- posted as a SEPARATE internal comment, never in the public triage
+4. **Team recommendation** -- which team should own this and why
+5. **Investigation results** -- what was found in Snowflake, Atlan, QuickSight, or related tickets
+6. **Atlan links** -- for every Snowflake object referenced (table, view, column)
+7. **Self-service path** -- if the requester can resolve this themselves, explain how
+8. **Role recommendation** -- if Snowflake access needed, recommend the specific role + [DnA Knowledge Hub](https://wiki.atl.workiva.net/spaces/BT/pages/505678345/Runbooks) link
+9. **Example SQL** -- when it would help the requester get started
+10. **Next steps** -- specific actions for the requester or the assigned team
+
+### Public Triage Comment Template
 
 ```
-================================================================================
-[AUTO] DATA-2492: Add ARR columns to subscription reporting model
-  Service Type: I need to make changes to the existing service (...)
-  Biz Priority: Fixed Deadline / Upcoming Milestone
-  Jira Priority: High -> SLA: Reviewed over the next business day.
-  Tier: 3 (Handoff to DNA)
-  RICE Score: 3.13 (High) [R=5 I=1.88 C=80% E=3]
+*Triage Assessment -- DATA-XXXX*
 
-  Action (sla/handoff/close/skip) [handoff]:
+h4. Request
+<1-2 sentence summary of what is being asked>
+
+h4. Conformance & Prioritization
+|| Metric || Value ||
+| Conformance | X/5 (AUTO/ENRICH) |
+| SLA Tier | X -- <SLA text> |
+| Jira Priority | <priority> (updated from <old>) |
+| Recommended Team | <team> |
+
+h4. Investigation
+<tables found, columns checked, Atlan links, related tickets, Snowflake query results>
+
+|| Asset || Link ||
+| <table_name> | [Atlan|https://workiva.atlan.com/assets/<guid>/overview] |
+
+h4. Self-Service Path
+<role recommendation, Knowledge Hub link, example SQL>
+
+h4. Next Steps
+Hi [~reporter.username],
+<specific questions or actions for the requester>
+
+Thank you,
+Dean
 ```
 
-**Decision Guide:**
+### Estimated RICE Comment Template (separate comment)
 
-| Tier | Service Type | Default Action | What Happens |
-|------|-------------|----------------|--------------|
-| 1 | Access / Permissions | `sla` | Post SLA + RICE comments, resolve at desk |
-| 1 | Business Question | `sla` | Post SLA + RICE comments, resolve at desk |
-| 2 | Troubleshooting | `sla` or `handoff` | If quick fix: resolve. If engineering needed: move to DNA |
-| 2 | Other / General | `sla` or `handoff` | Use judgment based on description |
-| 3 | Build New | `handoff` | Move to DNA |
-| 3 | Change Existing | `handoff` | Move to DNA |
-| 3 | ML / AI | `handoff` | Move to DNA |
+```
+*Internal -- Estimated RICE Scoring*
+|| Metric || Value ||
+| Conformance | X/5 (AUTO/ENRICH) -- <missing fields if any> |
+| Estimated RICE Score | X.XX (<bucket>) -- Reach=X, Impact=X, Confidence=X%, Effort=X |
+| Calculated Priority | <priority> |
+| Biz Priority | <from intake form> |
+| Recommended Team | <team> |
+```
 
-**When you choose `handoff`:**
+---
 
-You will be prompted for the DNA ticket fields:
+## Standard Investigation Sequence
 
-| Prompt | What to enter |
-|--------|---------------|
-| Team | The engineering team that will do the work. Pick from: Data Engineering, Analytics Engineering, BI, Data Science, Data & Analytics, Data Operations, Data Platform and AI |
-| Effort points | Estimated size: 1 (XS/1 day), 2 (S/2-3 days), 3 (M/4-5 days), 5 (L/2 weeks), 8 (XL/1-2 months), 13 (XXL/>2 months). Type `skip` if unsure. |
-| Epic link | The DNA Epic this work falls under (e.g., DNA-5472). Type `skip` if unsure. |
-| Stakeholder | Jira username of the Director+ stakeholder (e.g., victoria.zhang). Type `skip` to auto-infer from reporter's org. |
+### Always Do (Every Ticket)
 
-**Handoff is a two-phase process** because the DATA project is Jira Service Management (JSM) and the DNA project is standard Jira. The REST API cannot move issues between these project types.
+1. **Related ticket search** -- find duplicates and prior work:
+   ```
+   project IN (DATA, DNA) AND text ~ "<key terms>" ORDER BY created DESC
+   ```
 
-**Phase 1 — Plan:** The script records the move instructions and planned DNA fields.
+2. **Reporter lookup** -- check active status and reporting structure:
+   ```sql
+   SELECT PREFERRED_NAME, BUSINESS_TITLE, DEPARTMENT_DESCRIPTION, MANAGER_1
+   FROM GOLD_PROD.MARTS.DIM_WORKERS
+   WHERE IS_LATEST = TRUE AND LOWER(PRIMARY_EMAIL_ADDRESS) = '<email>'
+   ```
 
-**Phase 2 — Apply:** During apply, the script will:
-1. Display move instructions for each handoff ticket
-2. Pause and ask you to move the ticket manually in the Jira UI:
-   - Open the ticket → click **Move** (top-right menu or **•••** → **Move**)
-   - Target project: **DNA**
-   - **Set issue type to Story** (Service Request does not exist in DNA — the wizard will show a dropdown; select **Story**)
-   - Leave other fields as-is in the wizard — the API will set them in the next step
-   - Complete the wizard and note the new DNA key (e.g., DNA-6103)
-3. Prompt you for the new DNA key
-4. Set all DNA fields via the API on the new key (Team, Components, Priority, Stakeholder, Effort, Epic Link)
-5. Post a RICE score comment and a triage summary comment
+3. **Asset search** -- run `_assess.py` asset lookup, then search Atlan for referenced objects:
+   - Use Atlan API wildcard on `qualifiedName`: `*snowflake*<DB>/<SCHEMA>/<TABLE>`
+   - Verify links point to Snowflake objects, not Redshift
 
-If you type `skip` instead of a DNA key, the ticket is skipped — you can run `set_dna_fields` later.
+### By Ticket Type
 
-**Issue Type Mapping (DATA → DNA):**
+| Type | Additional Investigation |
+|------|------------------------|
+| **Data availability / new fields** | Check `INFORMATION_SCHEMA.COLUMNS` in Silver and Gold. Get Atlan links for source tables. Check if field arrives via Fivetran or Overlord (LAKE_PROD). Determine if fix is in ingestion config or dbt model. |
+| **QuickSight access** | Follow the QuickSight Access Troubleshooting sub-process (see below). |
+| **Data quality / pipeline** | Query the table to verify the reported issue with sample data. Check Atlan lineage for upstream source. |
+| **Access / permissions** | Run `SHOW GRANTS ON <object>` and trace the role chain with `SHOW GRANTS OF ROLE <role>`. Use the DnA Snowflake Access Agent for role recommendations. Check if user has a Snowflake account (`SHOW USERS LIKE '%name%'`). |
+| **Customer data pull** | Verify data exists in Snowflake. Route to CPX Insights (not DnA). |
+| **Dashboard / Streamlit enhancement** | Identify the dashboard/Streamlit owner. Verify the requested data is available in Snowflake Gold layer. |
+| **Atlan metadata** | Check the current Atlan description/column definition. Route to Analytics Engineering for dbt YAML updates. |
+
+---
+
+## QuickSight Access Troubleshooting
+
+### Step 1: Check QuickSight User Roster
+
+Search `quicksight_users.csv` (exported from the QuickSight admin console) for the requester's email:
+
+```bash
+grep -i "<email>" quicksight_users.csv
+```
+
+- **Not found:** User has not accessed QuickSight in 60+ days. They may have never been provisioned.
+- **Found with READER role:** User is provisioned. The issue is dashboard-level permissions.
+
+### Step 2: Check Employee Status
+
+Verify the requester is an active employee:
+
+```sql
+SELECT PREFERRED_NAME, IS_ACTIVE, IS_TERMINATED, BUSINESS_TITLE, DEPARTMENT_DESCRIPTION
+FROM GOLD_PROD.MARTS.DIM_WORKERS
+WHERE IS_LATEST = TRUE AND LOWER(PRIMARY_EMAIL_ADDRESS) = '<email>'
+```
+
+### Step 3: Identify Dashboard Owner (if dashboard URL provided)
+
+Extract the dashboard ID from the URL and look up the owner:
+
+```bash
+aws quicksight describe-dashboard --aws-account-id 048025451352 \
+  --dashboard-id "<id>" --query 'Dashboard.Name' --output text
+
+aws quicksight describe-dashboard-permissions --aws-account-id 048025451352 \
+  --dashboard-id "<id>" \
+  --query 'Permissions[?contains(Actions, `quicksight:UpdateDashboardPermissions`)].Principal' \
+  --output text
+```
+
+### Step 4: Post Triage
+
+Include in the triage comment:
+- QuickSight roster status (found or not found)
+- Dashboard owner(s) who can grant access
+- Link to [QuickSight: Authentication Failed When Clicking Dashboard Links](https://wiki.atl.workiva.net/spaces/BT/pages/530849193)
+
+**Key fact:** A QuickSight account is automatically provisioned when the Okta tile is used. Dashboard-level access must be granted separately by a dashboard owner.
+
+---
+
+## Handoff to DNA (Two-Phase Process)
+
+The DATA project is JSM and the DNA project is standard Jira. The REST API cannot move issues between these project types.
+
+### Phase 1: Post triage and handoff comment on the DATA ticket
+
+Include in the handoff comment:
+- Recommended Team, Component, and Assignee for the DNA ticket
+- Any investigation context that the assigned engineer will need
+
+### Phase 2: TPM manually moves in the Jira UI
+
+1. Open the ticket in Jira UI
+2. Click **Move** (top-right menu or ... -> Move)
+3. Target project: **DNA**
+4. Set issue type to **Story** (Service Request does not exist in DNA)
+5. Complete the wizard and note the new DNA key
+
+### Phase 3: Set fields on the new DNA ticket via API
+
+After the TPM provides the new DNA key, set:
+- Team (`customfield_10288`)
+- Component(s)
+- Assignee
+- Priority
+
+**Issue Type Mapping (DATA -> DNA):**
 
 | DATA Type | DNA Type |
 |-----------|----------|
@@ -112,56 +361,31 @@ If you type `skip` instead of a DNA key, the ticket is skipped — you can run `
 | Epic | Epic |
 | Sub-task | Sub-task |
 
-### 3. Triage the ENRICH Path
+**DNA Team Field:** `customfield_10288` (not `customfield_14703` which is DATA-only)
+
+**Valid DNA Components:** access, Atlan, BI, C360, Cortex, Data Platform and AI, Data Warehouse, DBT, Gainsight, Jira, Operations, Salesforce, Snowflake, Zendesk (and others -- check editmeta for full list)
+
+---
+
+## Batch Triage (Scripted Process)
+
+For high-volume queue cleanup, use the scripted plan/apply workflow:
 
 ```bash
-python triage_data.py plan --path enrich
+source .venv/bin/activate
+PYTHONPATH=$PWD python triage/audit_data.py                      # Check the queue
+PYTHONPATH=$PWD python triage/triage_data.py plan --path auto    # Plan for conforming tickets
+PYTHONPATH=$PWD python triage/triage_data.py plan --path enrich  # Plan for non-conforming tickets
+PYTHONPATH=$PWD python triage/triage_data.py apply plans/<file>  # Execute the plan
 ```
 
-For each non-conforming ticket:
+The scripted process handles SLA comments, RICE scoring, and handoff prompts automatically. Use this for bulk operations; use the AI-Assisted workflow for individual ticket investigation.
 
-```
-================================================================================
-[ENRICH] DATA-2491: [Data Deletion] Discover Financial Services - DNA
-  Issue Type: Task
-  Status: Open
-  Missing: service_type, teams_impacted, biz_priority, primary_solution
-  Description: Please delete all Discover Financial Services data from the DNA...
-
-  Action (triage/request_info/close/skip) [triage]:
-```
-
-**Decision Guide:**
-
-| Situation | Action |
-|-----------|--------|
-| You understand the request and can classify it | `triage` — set service type and priority manually, then handoff or resolve |
-| The request is unclear or missing critical info | `request_info` — posts a comment asking the requester to update |
-| The ticket is a duplicate or no longer relevant | `close` — enter a reason |
-| You want to come back to it later | `skip` |
-
-### 4. Review and Apply Plans
-
-After running `plan` for both paths, review the generated plan files in `plans/`, then apply:
-
-```bash
-python triage_data.py apply plans/triage_plan_<timestamp>.json
-```
-
-The apply phase takes a snapshot before making changes, then executes each action. For handoff actions, it will pause for the manual Jira move.
-
-### 5. Verify
-
-After triage, spot-check 2-3 tickets in Jira:
-
-- **DATA tickets with `sla` action:** Should have an SLA comment and a RICE score comment
-- **Tickets moved to DNA:** Should be in the DNA project with correct Team, Components, Priority, and a move summary comment
-
-All actions are logged to `changes/triage_YYYYMMDD_HHMMSS.json`.
+---
 
 ## RICE Prioritization
 
-Every triaged ticket gets a RICE score posted as a comment. The score is calculated from the intake form fields:
+Every triaged ticket gets an Estimated RICE score posted as a separate comment. The score is calculated from the intake form fields:
 
 | Factor | Source | Scale |
 |--------|--------|-------|
@@ -193,11 +417,9 @@ Every triaged ticket gets a RICE score posted as a comment. The score is calcula
 Once per week, review stale DNA tickets:
 
 ```bash
-python groom_stale.py --report-only               # See what's stale
-python groom_stale.py --interactive --execute      # Walk through and close stale tickets
+PYTHONPATH=$PWD python grooming/groom_stale.py --report-only
+PYTHONPATH=$PWD python grooming/groom_stale.py --interactive --execute
 ```
-
-The script categorizes stale tickets into tiers:
 
 | Tier | Criteria | Default Action |
 |------|----------|----------------|
@@ -207,43 +429,46 @@ The script categorizes stale tickets into tiers:
 
 ## Monthly Health Check
 
-Once per month, run the full compliance audit and generate a report for engineering leads:
-
 ```bash
-python audit_dna.py                                # Audit all open DNA tickets
-python groom_report.py                             # Generate HTML + Markdown reports
-python repair_dna.py --dry-run                     # Preview auto-repairs
-python repair_dna.py --execute --batch-size 10     # Apply repairs in batches
+PYTHONPATH=$PWD python grooming/audit_dna.py
+PYTHONPATH=$PWD python grooming/groom_report.py
+PYTHONPATH=$PWD python grooming/repair_dna.py --dry-run
+PYTHONPATH=$PWD python grooming/repair_dna.py --execute --batch-size 10
 ```
 
 ## Safety and Rollback
 
 | Feature | How It Works |
 |---------|--------------|
-| Dry run | All scripts default to `--dry-run`. You must pass `--execute` to make changes. |
-| Snapshots | Taken automatically before any modifications. Stored in `snapshots/`. |
+| Snapshots | **Mandatory** before any modifications. `PYTHONPATH=$PWD python safety/snapshot.py --keys <KEY> --label pre_triage` |
 | Change log | Every action logged to `changes/`. |
-| Rollback (full) | `python rollback.py restore snapshots/<file>.json --execute` |
-| Rollback (surgical) | `python rollback.py undo changes/<file>.json --keys DNA-5001 --execute` |
+| Rollback (full) | `PYTHONPATH=$PWD python safety/rollback.py restore snapshots/<file>.json --execute` |
+| Rollback (surgical) | `PYTHONPATH=$PWD python safety/rollback.py undo changes/<file>.json --keys DNA-5001 --execute` |
 | Additive only | Component repairs only add official values. Existing components are never removed. |
 
 ## Quick Reference
 
 ```bash
-# Daily
-python audit_data.py                               # Check the queue
-python triage_data.py plan --path auto              # Plan fast-triage for conforming tickets
-python triage_data.py plan --path enrich            # Plan for non-conforming tickets
-python triage_data.py apply plans/<plan_file>.json  # Execute the plan
+# Daily -- AI-Assisted Triage
+PYTHONPATH=$PWD python safety/snapshot.py --keys DATA-XXXX --label pre_triage
+PYTHONPATH=$PWD python scripts/_assess.py DATA-XXXX
+
+# Daily -- Batch Triage
+PYTHONPATH=$PWD python triage/audit_data.py
+PYTHONPATH=$PWD python triage/triage_data.py plan --path auto
+PYTHONPATH=$PWD python triage/triage_data.py apply plans/<file>
+
+# QuickSight Access
+grep -i "<email>" quicksight_users.csv
+aws quicksight describe-dashboard-permissions --aws-account-id 048025451352 --dashboard-id "<id>"
 
 # Weekly
-python groom_stale.py --interactive --execute       # Close stale DNA tickets
+PYTHONPATH=$PWD python grooming/groom_stale.py --interactive --execute
 
 # Monthly
-python audit_dna.py                                 # Full DNA compliance audit
-python groom_report.py                              # Reports for eng leads
-python repair_dna.py --execute --batch-size 10      # Bulk repairs
+PYTHONPATH=$PWD python grooming/audit_dna.py
+PYTHONPATH=$PWD python grooming/groom_report.py
 
 # Emergency
-python rollback.py restore snapshots/<latest>.json --execute
+PYTHONPATH=$PWD python safety/rollback.py restore snapshots/<latest>.json --execute
 ```
