@@ -1,0 +1,42 @@
+flowchart TD
+    Audit["audit_data.py: Fetch all open DATA tickets"]
+    Score["Score conformance 0-5 from form fields"]
+    Split{"4-5/5?"}
+
+    Score --> Split
+    Audit --> Score
+
+    Split -->|Yes| Auto["AUTO Path"]
+    Split -->|No| Enrich["ENRICH Path"]
+
+    subgraph auto_actions [AUTO Path Actions]
+        FetchFields["Fetch full issue fields"]
+        RICE["Calculate RICE score"]
+        RenameSummary{"Summary = General Request?"}
+        RenameSummary -->|Yes| Propose["Propose concise title"]
+        RenameSummary -->|No| TeamRec
+        Propose --> TeamRec["Recommend team"]
+        TeamRec --> ChooseAction{"Choose action"}
+    end
+
+    subgraph enrich_actions [ENRICH Path Actions]
+        ShowDesc["Show description excerpt"]
+        RenameE{"Summary = General Request?"}
+        RenameE -->|Yes| ProposeE["Propose concise title"]
+        RenameE -->|No| ChooseE
+        ProposeE --> ChooseE{"Choose action"}
+    end
+
+    Auto --> FetchFields
+    FetchFields --> RICE
+    RICE --> RenameSummary
+    Enrich --> ShowDesc
+    ShowDesc --> RenameE
+
+    ChooseAction -->|sla| SLA["Set priority + post SLA + RICE comments"]
+    ChooseAction -->|handoff| Handoff["Move to DNA project"]
+    ChooseAction -->|close| Close["Close ticket"]
+
+    ChooseE -->|triage| ManualTriage["Set service type + priority manually"]
+    ChooseE -->|request_info| ReqInfo["Post comment asking for missing fields"]
+    ChooseE -->|close| CloseE["Close ticket"]

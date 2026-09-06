@@ -55,7 +55,8 @@ SERVICE_TYPE_DEFAULT_EFFORT = {
 }
 
 
-def calculate_rice(fields: dict, effort_override: int = None) -> dict:
+def calculate_rice(fields: dict, effort_override: int = None,
+                   reach_override: int = None) -> dict:
     """Calculate RICE score from DATA ticket form fields.
 
     Returns dict with each component score, the final RICE score, and a summary.
@@ -63,7 +64,6 @@ def calculate_rice(fields: dict, effort_override: int = None) -> dict:
     # Reach
     teams_impacted = _get_field_value(fields, CF_TEAMS_IMPACTED)
     if isinstance(teams_impacted, list) and teams_impacted:
-        # Take the highest-reach selection if multiple
         reach = max(REACH_SCORES.get(t, 1) for t in teams_impacted)
         reach_label = teams_impacted[0] if len(teams_impacted) == 1 else f"{len(teams_impacted)} selections"
     elif isinstance(teams_impacted, str):
@@ -72,6 +72,26 @@ def calculate_rice(fields: dict, effort_override: int = None) -> dict:
     else:
         reach = 1
         reach_label = "Unknown (defaulted to 1)"
+
+    # Reach boost: platform-level enablement requests affect all users of that tool,
+    # not just the requester. Detect and adjust.
+    description = (fields.get("description") or "").lower()
+    summary = (fields.get("summary") or "").lower()
+    text = summary + " " + description
+    platform_keywords = ["enable", "turn on", "activate", "flip the switch",
+                         "feature flag", "account-level", "org-level", "all users",
+                         "account setting"]
+    if reach <= 2 and any(kw in text for kw in platform_keywords):
+        service_type_val = _get_field_value(fields, CF_SERVICE_TYPE) or ""
+        if "access" in service_type_val.lower() or "system" in service_type_val.lower():
+            matched = [kw for kw in platform_keywords if kw in text]
+            reach = 10
+            reach_label = f"Platform enablement (boosted from {REACH_SCORES.get(teams_impacted[0] if isinstance(teams_impacted, list) and teams_impacted else '', 1)}): {', '.join(matched[:2])}"
+
+    # Manual override (from plan file edits)
+    if reach_override is not None:
+        reach = reach_override
+        reach_label = f"Manual override ({reach_override})"
 
     # Impact
     service_type = _get_field_value(fields, CF_SERVICE_TYPE) or ""

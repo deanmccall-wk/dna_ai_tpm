@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Capture full field snapshots of Jira tickets before modifications."""
+"""Capture full field snapshots of Jira tickets before modifications.
+
+Each ticket gets its own directory under snapshots/<KEY>/.
+"""
 
 import argparse
 import json
@@ -29,31 +32,38 @@ def take_snapshot(jira: JiraClient, keys: list[str]) -> dict:
     return tickets
 
 
-def save_snapshot(tickets: dict, label: str = "") -> str:
-    """Save snapshot to disk. Returns the file path."""
-    os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+def save_snapshot(tickets: dict, label: str = "") -> list[str]:
+    """Save one snapshot file per ticket. Returns list of saved paths."""
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"snapshot_{ts}"
-    if label:
-        filename += f"_{label}"
-    filename += ".json"
-    path = os.path.join(SNAPSHOT_DIR, filename)
+    timestamp_iso = datetime.now(timezone.utc).isoformat()
+    paths = []
 
-    payload = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "label": label,
-        "ticket_count": len(tickets),
-        "tickets": tickets,
-    }
-    with open(path, "w") as f:
-        json.dump(payload, f, indent=2, default=str)
+    for key, fields in tickets.items():
+        ticket_dir = os.path.join(SNAPSHOT_DIR, key)
+        os.makedirs(ticket_dir, exist_ok=True)
 
-    size_kb = os.path.getsize(path) / 1024
-    print(f"\nSnapshot saved: {path} ({len(tickets)} tickets, {size_kb:.1f} KB)")
-    return path
+        filename = ts
+        if label:
+            filename += f"_{label}"
+        filename += ".json"
+        path = os.path.join(ticket_dir, filename)
+
+        payload = {
+            "key": key,
+            "timestamp": timestamp_iso,
+            "label": label,
+            "fields": fields,
+        }
+        with open(path, "w") as f:
+            json.dump(payload, f, indent=2, default=str)
+        paths.append(path)
+
+    total_kb = sum(os.path.getsize(p) for p in paths) / 1024
+    print(f"\nSnapshot saved: {len(paths)} tickets in {SNAPSHOT_DIR}/ ({total_kb:.1f} KB total)")
+    return paths
 
 
-def snapshot_from_jql(jira: JiraClient, jql: str, label: str = "") -> str:
+def snapshot_from_jql(jira: JiraClient, jql: str, label: str = "") -> list[str]:
     """Snapshot all tickets matching a JQL query."""
     print(f"Searching: {jql}")
     issues = jira.search_all(jql, fields=["key"])
@@ -61,16 +71,29 @@ def snapshot_from_jql(jira: JiraClient, jql: str, label: str = "") -> str:
     print(f"Found {len(keys)} tickets")
     if not keys:
         print("Nothing to snapshot.")
-        return ""
+        return []
     tickets = take_snapshot(jira, keys)
     return save_snapshot(tickets, label)
 
 
-def snapshot_from_keys(jira: JiraClient, keys: list[str], label: str = "") -> str:
+def snapshot_from_keys(jira: JiraClient, keys: list[str], label: str = "") -> list[str]:
     """Snapshot specific tickets by key."""
     print(f"Snapshotting {len(keys)} tickets")
     tickets = take_snapshot(jira, keys)
     return save_snapshot(tickets, label)
+
+
+def get_latest_snapshot(key: str) -> dict:
+    """Load the most recent snapshot for a given ticket key."""
+    ticket_dir = os.path.join(SNAPSHOT_DIR, key)
+    if not os.path.exists(ticket_dir):
+        return {}
+    files = sorted(os.listdir(ticket_dir))
+    if not files:
+        return {}
+    latest = os.path.join(ticket_dir, files[-1])
+    with open(latest) as f:
+        return json.load(f)
 
 
 def main():

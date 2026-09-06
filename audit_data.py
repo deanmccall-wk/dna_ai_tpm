@@ -37,7 +37,7 @@ def main():
 
     print("Fetching open DATA tickets...")
     issues = jira.search_all(
-        'project = DATA AND statusCategory != Done ORDER BY key DESC',
+        'project = DATA AND status != Closed AND status != Resolved AND status != Canceled AND status != Done ORDER BY key DESC',
         fields=FIELDS,
     )
     print(f"Found {len(issues)} open/active tickets\n")

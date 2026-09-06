@@ -303,6 +303,122 @@ def resolve_virtual_team(team_name: str) -> dict:
     return {"team": team_name, "component": None}
 
 
+def propose_summary(fields: dict) -> str:
+    """Propose a concise title when the current summary is generic (e.g. 'General Request').
+
+    Aims for a short, scannable title like:
+      "Add Gainsight CTA fields to Snowflake"
+      "FX rates missing from OANDA candle table"
+      "[Warehouse] T&E dashboard spend reporting"
+    """
+    current = (fields.get("summary") or "").strip()
+    if current.lower() not in ("general request", "general request ", ""):
+        return ""
+
+    description = fields.get("description") or ""
+    service_type = _get_field_value(fields, CF_SERVICE_TYPE) or ""
+    primary_solutions = _get_field_value(fields, CF_PRIMARY_SOLUTION) or []
+    if isinstance(primary_solutions, str):
+        primary_solutions = [primary_solutions]
+
+    skip_phrases = [
+        "please write a few sentence",
+        "the core problem, its business value",
+        "acceptance criteria",
+        "definition of \"done\"",
+        "specific requirements, deliverables",
+        "post-launch impact",
+    ]
+
+    lines = description.replace("\r\n", "\n").split("\n")
+
+    # Check for explicit title
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("*Title:*"):
+            title = stripped.replace("*Title:*", "").strip().rstrip(".")
+            if title and len(title) > 5:
+                return _truncate_title(title)
+
+    # Extract meaningful content lines
+    meaningful = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or len(stripped) < 15:
+            continue
+        if any(p in stripped.lower() for p in skip_phrases):
+            continue
+        # Strip Jira markup labels
+        for label in ["*Strategic Context:*", "*Scope of Work:*", "*Success Metrics:*",
+                       "Strategic Context:", "Scope of Work:", "Success Metrics:"]:
+            stripped = stripped.replace(label, "").strip()
+        if stripped and len(stripped) > 10:
+            meaningful.append(stripped)
+
+    if not meaningful:
+        # Fallback from service type + solution
+        return _fallback_title(service_type, primary_solutions)
+
+    # Take the first meaningful line and condense it to a title
+    raw = meaningful[0].rstrip(".")
+
+    # Trim common filler openings
+    filler = ["we have created ", "we have ", "we need to ", "we need ", "we would like to ",
+              "we'd like to ", "we are ", "we're ",
+              "i need to ", "i need ", "i would like to ", "i'd like to ",
+              "i'm requesting support to help with the ", "i'm requesting support to ",
+              "i'm requesting ", "i am requesting ",
+              "requesting ", "request to ", "can we ", "could we ", "please ",
+              "hi team, ", "hello, ", "hi! ", "hi, ",
+              "currently ", "our ", "the ", "with the "]
+    lower = raw.lower()
+    for f in filler:
+        if lower.startswith(f):
+            raw = raw[len(f):]
+            raw = raw[0].upper() + raw[1:] if raw else raw
+            break
+
+    title = _truncate_title(raw, max_len=60)
+
+    # Prepend primary solution tag if not already referenced
+    if primary_solutions:
+        sol = primary_solutions[0]
+        if sol.lower() not in title.lower():
+            title = f"[{sol}] {title}"
+            title = _truncate_title(title, max_len=72)
+
+    return title
+
+
+def _truncate_title(text: str, max_len: int = 80) -> str:
+    if len(text) <= max_len:
+        return text
+    # Cut at last word boundary
+    truncated = text[:max_len]
+    last_space = truncated.rfind(" ")
+    if last_space > max_len // 2:
+        truncated = truncated[:last_space]
+    return truncated.rstrip(" .,;:") + "..."
+
+
+def _fallback_title(service_type: str, primary_solutions: list[str]) -> str:
+    short_types = {
+        SERVICE_TYPES["build_new"]: "New build",
+        SERVICE_TYPES["change_existing"]: "Change request",
+        SERVICE_TYPES["business_question"]: "Data question",
+        SERVICE_TYPES["troubleshooting"]: "Troubleshooting",
+        SERVICE_TYPES["access"]: "Access request",
+        SERVICE_TYPES["ml_ai"]: "ML/AI request",
+        SERVICE_TYPES["other"]: "Request",
+    }
+    parts = []
+    if service_type and service_type in short_types:
+        parts.append(short_types[service_type])
+    if primary_solutions:
+        parts.append(" + ".join(primary_solutions[:2]))
+    return " — ".join(parts) if parts else ""
+
+
 # ---------------------------------------------------------------------------
 # DATA ticket assessment (form-field based)
 # ---------------------------------------------------------------------------
@@ -530,24 +646,13 @@ TYPE_CONVERSION = {
 }
 
 
-def move_to_dna(jira: JiraClient, issue_key: str, issue_type: str = None,
-                team: str = "", stakeholder_username: str = "",
-                components: list[str] = None, effort_points: int = None,
-                epic_link: str = "", extra_fields: dict = None) -> str:
-    """Move a DATA ticket to the DNA project, setting required DNA fields.
+def prepare_move_instructions(jira: JiraClient, issue_key: str,
+                              team: str = "", components: list[str] = None) -> dict:
+    """Prepare instructions for a manual Jira UI move from DATA to DNA.
 
-    Auto-derives what it can from DATA form fields:
-    - Priority from Business Priority (cf[30221])
-    - Components from Primary Solution (cf[18124])
-    - Issue type conversion (Service Request -> Story)
-
-    Fields that must be provided or prompted:
-    - team (required)
-    - stakeholder_username (required, can be inferred from reporter via dim_workers)
-    - effort_points (required on issues, can be set later)
-    - epic_link (required on issues, can be set later)
-
-    Preserves history, comments, and attachments. Returns the issue key.
+    Returns a dict with move instructions and planned field values.
+    The actual move must be done in the Jira UI because JSM (DATA) to
+    standard (DNA) project moves are not supported via the REST API.
     """
     current = jira.get_issue(issue_key, fields=[
         "issuetype", CF_BIZ_PRIORITY, CF_PRIMARY_SOLUTION,
@@ -555,26 +660,65 @@ def move_to_dna(jira: JiraClient, issue_key: str, issue_type: str = None,
     ])
     current_fields = current["fields"]
     current_type = current_fields["issuetype"]["name"]
+    target_type = TYPE_CONVERSION.get(current_type, current_type)
 
-    target_type = issue_type or TYPE_CONVERSION.get(current_type, current_type)
-    if target_type not in ("Bug", "Epic", "Incident Response", "Initiative",
-                           "Story", "Sub-task", "Support Ticket", "Task"):
-        raise ValueError(f"Issue type '{target_type}' does not exist in DNA project")
+    # Derive components from Primary Solution
+    primary_solutions = _get_field_value(current_fields, CF_PRIMARY_SOLUTION) or []
+    if isinstance(primary_solutions, str):
+        primary_solutions = [primary_solutions]
+    existing_comps = [c.get("name", "") for c in current_fields.get("components", [])]
+    derived_comps = set()
+    for ps in primary_solutions:
+        mapped = COMPONENT_KEYWORD_MAP.get(ps, [])
+        derived_comps.update(mapped)
+    if components:
+        derived_comps.update(components)
+    all_comps = sorted(set(existing_comps) | derived_comps)
 
-    fields = {"project": {"key": "DNA"}}
-    comment_lines = ["Moved from DATA to DNA during triage:"]
-
-    # Issue type conversion
-    if target_type != current_type:
-        fields["issuetype"] = {"name": target_type}
-        comment_lines.append(f"* Type: {current_type} -> {target_type}")
-
-    # Priority from Business Priority form field
+    # Derive priority
     biz_priority = _get_field_value(current_fields, CF_BIZ_PRIORITY)
-    if biz_priority and biz_priority in BIZ_PRIORITY_TO_JIRA:
-        jira_priority = BIZ_PRIORITY_TO_JIRA[biz_priority]
-        fields["priority"] = {"name": jira_priority}
-        comment_lines.append(f"* Priority: {jira_priority} (from \"{biz_priority}\")")
+    jira_priority = BIZ_PRIORITY_TO_JIRA.get(biz_priority, "Medium") if biz_priority else "Medium"
+
+    return {
+        "issue_key": issue_key,
+        "source_project": "DATA",
+        "target_project": "DNA",
+        "source_type": current_type,
+        "target_type": target_type,
+        "team": team,
+        "priority": jira_priority,
+        "components": all_comps,
+        "steps": [
+            f"Open {issue_key} in Jira",
+            "Click Move (top-right menu or ••• → Move)",
+            "Target project: DNA",
+            f"Set issue type: {target_type} (maps from {current_type})",
+            "Complete the move wizard — leave other fields as-is (the API will set them next)",
+        ],
+    }
+
+
+def set_dna_fields(jira: JiraClient, issue_key: str,
+                   team: str = "", stakeholder_username: str = "",
+                   components: list[str] = None, effort_points: int = None,
+                   epic_link: str = "", priority: str = "",
+                   extra_fields: dict = None) -> str:
+    """Set DNA-required fields on a ticket that has already been moved to DNA.
+
+    Call this after the manual Jira UI move from DATA to DNA.
+    Sets team, stakeholder, components (additive), effort, epic link, and priority.
+    Posts a triage comment summarizing the changes. Returns the issue key.
+    """
+    current = jira.get_issue(issue_key, fields=["components"])
+    current_fields = current["fields"]
+
+    fields = {}
+    comment_lines = ["DNA fields set during triage:"]
+
+    # Priority
+    if priority:
+        fields["priority"] = {"name": priority}
+        comment_lines.append(f"* Priority: {priority}")
 
     # Team
     if team:
@@ -586,24 +730,14 @@ def move_to_dna(jira: JiraClient, issue_key: str, issue_type: str = None,
         fields[CF_STAKEHOLDER] = [{"name": stakeholder_username}]
         comment_lines.append(f"* Stakeholder: {stakeholder_username}")
 
-    # Components from Primary Solution form field
-    primary_solutions = _get_field_value(current_fields, CF_PRIMARY_SOLUTION) or []
-    if isinstance(primary_solutions, str):
-        primary_solutions = [primary_solutions]
+    # Components (additive-only)
     existing_comps = [c.get("name", "") for c in current_fields.get("components", [])]
-    derived_comps = set()
-    for ps in primary_solutions:
-        mapped = COMPONENT_KEYWORD_MAP.get(ps, [])
-        derived_comps.update(mapped)
-    # Merge with explicitly provided components
     if components:
-        derived_comps.update(components)
-    # Remove already-present
-    new_comps = sorted(derived_comps - set(existing_comps))
-    if new_comps:
-        merged = existing_comps + new_comps
-        fields["components"] = [{"name": c} for c in merged]
-        comment_lines.append(f"* Components: added {', '.join(new_comps)}")
+        new_comps = sorted(set(components) - set(existing_comps))
+        if new_comps:
+            merged = existing_comps + new_comps
+            fields["components"] = [{"name": c} for c in merged]
+            comment_lines.append(f"* Components: added {', '.join(new_comps)}")
 
     # Effort points
     if effort_points is not None:
@@ -621,7 +755,8 @@ def move_to_dna(jira: JiraClient, issue_key: str, issue_type: str = None,
             if k not in ("reporter", "duedate"):
                 fields[k] = v
 
-    jira.update_issue(issue_key, fields)
+    if fields:
+        jira.update_issue(issue_key, fields)
     jira.add_comment(issue_key, "\n".join(comment_lines))
 
     return issue_key
@@ -653,3 +788,20 @@ def close_data_ticket(jira: JiraClient, issue_key: str) -> None:
             f"Available transitions: {available}"
         )
     jira.transition_issue(issue_key, close_transition["id"])
+
+
+# ---------------------------------------------------------------------------
+# Deletion ticket detection
+# ---------------------------------------------------------------------------
+
+DELETION_RUNBOOK_URL = "https://wiki.atl.workiva.net/spaces/BT/pages/530849217"
+
+DELETION_KEYWORDS = [
+    "data deletion", "delete end client data", "certificate of destruction",
+    "deletion request", "workspace deletion", "org deletion",
+]
+
+
+def is_deletion_ticket(fields: dict) -> bool:
+    text = ((fields.get("summary") or "") + " " + (fields.get("description") or "")).lower()
+    return any(kw in text for kw in DELETION_KEYWORDS)

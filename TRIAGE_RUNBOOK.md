@@ -20,6 +20,14 @@ python verify_connection.py
 
 ## Daily Triage
 
+### 0. Deletion Tickets
+
+Data deletion tickets (from SaaS Ops) are automatically detected during triage and routed to the deletion process. They skip standard triage.
+
+- **Runbook:** [Customer Data Deletion — Data Operations Runbook](https://wiki.atl.workiva.net/spaces/BT/pages/530849217)
+- **Automation:** `python verify_deletion.py <ticket_key> --post --close`
+- **Indicators:** Summary contains "Data Deletion", "Delete End Client Data", "Certificate of Destruction"
+
 ### 1. Check the Queue
 
 ```bash
@@ -37,7 +45,7 @@ The output shows each ticket with its conformance score, inferred priority, serv
 ### 2. Triage the AUTO Path
 
 ```bash
-python triage_data.py --execute --path auto
+python triage_data.py plan --path auto
 ```
 
 For each conforming ticket you will see:
@@ -77,18 +85,37 @@ You will be prompted for the DNA ticket fields:
 | Epic link | The DNA Epic this work falls under (e.g., DNA-5472). Type `skip` if unsure. |
 | Stakeholder | Jira username of the Director+ stakeholder (e.g., victoria.zhang). Type `skip` to auto-infer from reporter's org. |
 
-The script will:
-1. Move the ticket from DATA to DNA (preserves all history and attachments)
-2. Convert the issue type (Service Request becomes Story)
-3. Set priority from the Business Priority form field
-4. Auto-derive Components from the Primary Solution form field
-5. Set Team, Stakeholder, Effort, and Epic Link from your inputs
-6. Post a RICE score comment and a move summary comment on the ticket
+**Handoff is a two-phase process** because the DATA project is Jira Service Management (JSM) and the DNA project is standard Jira. The REST API cannot move issues between these project types.
+
+**Phase 1 — Plan:** The script records the move instructions and planned DNA fields.
+
+**Phase 2 — Apply:** During apply, the script will:
+1. Display move instructions for each handoff ticket
+2. Pause and ask you to move the ticket manually in the Jira UI:
+   - Open the ticket → click **Move** (top-right menu or **•••** → **Move**)
+   - Target project: **DNA**
+   - **Set issue type to Story** (Service Request does not exist in DNA — the wizard will show a dropdown; select **Story**)
+   - Leave other fields as-is in the wizard — the API will set them in the next step
+   - Complete the wizard and note the new DNA key (e.g., DNA-6103)
+3. Prompt you for the new DNA key
+4. Set all DNA fields via the API on the new key (Team, Components, Priority, Stakeholder, Effort, Epic Link)
+5. Post a RICE score comment and a triage summary comment
+
+If you type `skip` instead of a DNA key, the ticket is skipped — you can run `set_dna_fields` later.
+
+**Issue Type Mapping (DATA → DNA):**
+
+| DATA Type | DNA Type |
+|-----------|----------|
+| Service Request | **Story** |
+| Task | Task |
+| Epic | Epic |
+| Sub-task | Sub-task |
 
 ### 3. Triage the ENRICH Path
 
 ```bash
-python triage_data.py --execute --path enrich
+python triage_data.py plan --path enrich
 ```
 
 For each non-conforming ticket:
@@ -113,7 +140,17 @@ For each non-conforming ticket:
 | The ticket is a duplicate or no longer relevant | `close` — enter a reason |
 | You want to come back to it later | `skip` |
 
-### 4. Verify
+### 4. Review and Apply Plans
+
+After running `plan` for both paths, review the generated plan files in `plans/`, then apply:
+
+```bash
+python triage_data.py apply plans/triage_plan_<timestamp>.json
+```
+
+The apply phase takes a snapshot before making changes, then executes each action. For handoff actions, it will pause for the manual Jira move.
+
+### 5. Verify
 
 After triage, spot-check 2-3 tickets in Jira:
 
@@ -195,8 +232,9 @@ python repair_dna.py --execute --batch-size 10     # Apply repairs in batches
 ```bash
 # Daily
 python audit_data.py                               # Check the queue
-python triage_data.py --execute --path auto         # Fast-triage conforming tickets
-python triage_data.py --execute --path enrich       # Handle non-conforming tickets
+python triage_data.py plan --path auto              # Plan fast-triage for conforming tickets
+python triage_data.py plan --path enrich            # Plan for non-conforming tickets
+python triage_data.py apply plans/<plan_file>.json  # Execute the plan
 
 # Weekly
 python groom_stale.py --interactive --execute       # Close stale DNA tickets

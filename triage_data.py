@@ -18,8 +18,10 @@ from tpm_workflow import (
     SLA_COMMENTS, BIZ_PRIORITY_TO_JIRA, SERVICE_TYPE_TIERS, SERVICE_TYPES,
     CF_SERVICE_TYPE, CF_BIZ_PRIORITY,
     assess_data_ticket, post_sla_comment, build_dna_payload,
-    create_dna_ticket, move_to_dna, close_data_ticket, VALID_TEAMS,
-    recommend_team, resolve_virtual_team, VIRTUAL_TEAMS,
+    create_dna_ticket, close_data_ticket, VALID_TEAMS,
+    recommend_team, resolve_virtual_team, VIRTUAL_TEAMS, propose_summary,
+    prepare_move_instructions, set_dna_fields,
+    is_deletion_ticket, DELETION_RUNBOOK_URL,
 )
 from snapshot import snapshot_from_keys
 from rice_scoring import calculate_rice, format_rice_comment
@@ -71,6 +73,20 @@ def plan_auto_ticket(jira: JiraClient, ticket: dict) -> dict:
     print(f"  RICE Score: {rice['rice_score']} ({rice['priority_bucket']}) "
           f"[R={rice['reach']} I={rice['impact']} C={int(rice['confidence']*100)}% E={rice['effort']}]")
 
+    # Propose a better summary if current one is generic
+    proposed_summary = propose_summary(fields)
+    if proposed_summary:
+        print(f"  Proposed summary: {proposed_summary}")
+        accept = input(f"  Accept proposed summary? [y/N/edit]: ").strip().lower()
+        if accept == "y":
+            new_summary = proposed_summary
+        elif accept == "edit":
+            new_summary = input(f"  Enter summary: ").strip() or None
+        else:
+            new_summary = None
+    else:
+        new_summary = None
+
     action = prompt_choice(
         "  Action",
         ["sla", "handoff", "close", "skip"],
@@ -84,6 +100,8 @@ def plan_auto_ticket(jira: JiraClient, ticket: dict) -> dict:
         "action": action,
         "rice": rice,
     }
+    if new_summary:
+        plan_entry["new_summary"] = new_summary
 
     if action == "sla":
         plan_entry["priority"] = ticket["jira_priority"]
@@ -110,12 +128,20 @@ def plan_auto_ticket(jira: JiraClient, ticket: dict) -> dict:
         epic_link = epic if epic.startswith("DNA-") else ""
         stakeholder = input("  Stakeholder username [skip]: ").strip() or ""
 
+        # Prepare move instructions (JSM->standard requires manual move)
+        extra_comps = [resolved["component"]] if resolved["component"] else []
+        move_info = prepare_move_instructions(jira, key, team=resolved["team"], components=extra_comps)
+        print(f"  \u26a0 Manual move required:")
+        for step in move_info["steps"]:
+            print(f"    {step}")
+
         plan_entry["team_choice"] = team_choice
         plan_entry["jira_team"] = resolved["team"]
         plan_entry["component"] = resolved["component"]
         plan_entry["effort_points"] = effort_pts
         plan_entry["epic_link"] = epic_link
         plan_entry["stakeholder"] = stakeholder
+        plan_entry["move_instructions"] = move_info
 
     elif action == "close":
         pass  # no extra fields needed
@@ -134,8 +160,23 @@ def plan_enrich_ticket(jira: JiraClient, ticket: dict) -> dict:
     print(f"  DNA refs: {ticket.get('dna_crossrefs', [])}")
 
     full = jira.get_issue(key, fields=["description"])
-    desc = (full.get("fields", {}).get("description") or "")[:300]
+    fields = full.get("fields", {})
+    desc = (fields.get("description") or "")[:300]
     print(f"  Description: {desc}")
+
+    # Propose a better summary if current one is generic
+    proposed_summary = propose_summary(fields)
+    if proposed_summary:
+        print(f"  Proposed summary: {proposed_summary}")
+        accept = input(f"  Accept proposed summary? [y/N/edit]: ").strip().lower()
+        if accept == "y":
+            new_summary = proposed_summary
+        elif accept == "edit":
+            new_summary = input(f"  Enter summary: ").strip() or None
+        else:
+            new_summary = None
+    else:
+        new_summary = None
 
     action = prompt_choice(
         "  Action",
@@ -149,6 +190,8 @@ def plan_enrich_ticket(jira: JiraClient, ticket: dict) -> dict:
         "path": "ENRICH",
         "action": action,
     }
+    if new_summary:
+        plan_entry["new_summary"] = new_summary
 
     if action == "request_info":
         plan_entry["missing_fields"] = ticket.get("missing_fields", [])
@@ -188,6 +231,22 @@ def run_plan(jira: JiraClient, path_filter: str):
 
     for ticket in tickets:
         try:
+            # Check for deletion tickets — route separately
+            full_issue = jira.get_issue(ticket["key"], fields=["summary", "description"])
+            if is_deletion_ticket(full_issue["fields"]):
+                print(f"\n{'='*80}")
+                print(f"[DELETION] {ticket['key']}: {ticket['summary']}")
+                print(f"  This is a data deletion ticket. Routing to deletion process.")
+                print(f"  Runbook: {DELETION_RUNBOOK_URL}")
+                action = prompt_choice("  Action", ["deletion", "skip"], default="deletion")
+                plan_entries.append({
+                    "key": ticket["key"],
+                    "summary": ticket["summary"],
+                    "path": "DELETION",
+                    "action": action,
+                })
+                continue
+
             if ticket.get("path") == "AUTO":
                 entry = plan_auto_ticket(jira, ticket)
             else:
@@ -217,6 +276,7 @@ def run_plan(jira: JiraClient, path_filter: str):
             "triage": sum(1 for e in plan_entries if e.get("action") == "triage"),
             "request_info": sum(1 for e in plan_entries if e.get("action") == "request_info"),
             "skip": sum(1 for e in plan_entries if e.get("action") == "skip"),
+            "deletion": sum(1 for e in plan_entries if e.get("action") == "deletion"),
         },
         "entries": plan_entries,
     }
@@ -277,13 +337,20 @@ def apply_plan(jira: JiraClient, plan_path: str):
         print(f"\n  [{key}] {action}: {entry.get('summary', '')[:60]}")
 
         try:
+            # Rename if a new summary was proposed during planning
+            new_summary = entry.get("new_summary")
+            if new_summary:
+                jira.update_issue(key, {"summary": new_summary})
+                print(f"    Renamed: {new_summary[:70]}")
+
             if action == "sla":
                 priority = entry.get("priority", "Medium")
+                jira.update_issue(key, {"priority": {"name": priority}})
                 post_sla_comment(jira, key, priority)
                 rice = entry.get("rice")
                 if rice:
                     jira.add_comment(key, format_rice_comment(rice))
-                print(f"    Posted SLA + RICE (priority={priority})")
+                print(f"    Set priority={priority}, posted SLA + RICE")
                 results.append({"key": key, "action": "sla", "status": "ok"})
 
             elif action == "handoff":
@@ -293,16 +360,29 @@ def apply_plan(jira: JiraClient, plan_path: str):
                 epic_link = entry.get("epic_link", "")
                 stakeholder = entry.get("stakeholder", "")
                 extra_comps = [component] if component else None
+                move_info = entry.get("move_instructions", {})
+                priority = move_info.get("priority", "Medium")
 
-                move_to_dna(jira, key, team=jira_team, stakeholder_username=stakeholder,
-                            components=extra_comps, effort_points=effort, epic_link=epic_link)
+                print(f"    \u26a0 Manual move required:")
+                for step in move_info.get("steps", [f"Move {key} to DNA via Jira UI"]):
+                    print(f"      {step}")
+                dna_key = input(f"    Enter new DNA key after manual move (or 'skip'): ").strip()
+                if not dna_key or dna_key.lower() == "skip":
+                    print(f"    Skipped — move {key} manually and run set_dna_fields later")
+                    results.append({"key": key, "action": "handoff", "status": "skipped"})
+                    continue
+
+                set_dna_fields(jira, dna_key, team=jira_team,
+                               stakeholder_username=stakeholder,
+                               components=extra_comps, effort_points=effort,
+                               epic_link=epic_link, priority=priority)
 
                 rice = entry.get("rice")
                 if rice:
-                    jira.add_comment(key, format_rice_comment(rice))
+                    jira.add_comment(dna_key, format_rice_comment(rice))
 
-                print(f"    Moved to DNA (team={jira_team}, component={component})")
-                results.append({"key": key, "action": "handoff", "status": "ok"})
+                print(f"    Fields set on {dna_key} (team={jira_team}, component={component})")
+                results.append({"key": key, "action": "handoff", "status": "ok", "dna_key": dna_key})
 
             elif action == "close":
                 reason = entry.get("reason", "Closed during triage.")
@@ -320,9 +400,20 @@ def apply_plan(jira: JiraClient, plan_path: str):
 
             elif action == "triage":
                 priority = entry.get("priority", "Medium")
+                jira.update_issue(key, {"priority": {"name": priority}})
                 post_sla_comment(jira, key, priority)
-                print(f"    Manual triage: posted SLA (priority={priority})")
+                print(f"    Manual triage: set priority={priority}, posted SLA")
                 results.append({"key": key, "action": "triage", "status": "ok"})
+
+            elif action == "deletion":
+                comment = (
+                    f"This is a data deletion request. "
+                    f"Follow the [Data Deletion Runbook|{DELETION_RUNBOOK_URL}] for processing.\n"
+                    f"Run: {{{{python verify_deletion.py {key} --post --close}}}}"
+                )
+                jira.add_comment(key, comment)
+                print(f"    Posted deletion runbook link")
+                results.append({"key": key, "action": "deletion", "status": "ok"})
 
             elif action == "error":
                 continue
