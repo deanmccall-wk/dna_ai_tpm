@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Triage assessment for DATA-2472."""
-import os, json, re
+"""Triage assessment for a DATA ticket."""
+import os, json, re, sys
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -13,13 +13,14 @@ from core.tpm_workflow import (
 from core.rice_scoring import calculate_rice
 from core.asset_lookup import lookup_assets_for_ticket, format_asset_context
 
+KEY = sys.argv[1] if len(sys.argv) > 1 else "DATA-2455"
+
 s = load_settings()
 jira = JiraClient(s.jira_base_url, s.jira_pat)
-
-issue = jira.get_issue("DATA-2472")
+issue = jira.get_issue(KEY)
 fields = issue["fields"]
 
-print("=== DATA-2472 Assessment ===")
+print(f"=== {KEY} Assessment ===")
 print(f"Summary: {fields.get('summary', '')}")
 print(f"Type: {fields.get('issuetype', {}).get('name', '')}")
 print(f"Status: {fields.get('status', {}).get('name', '')}")
@@ -34,10 +35,10 @@ print()
 if is_deletion_ticket(fields):
     print("*** DELETION TICKET ***\n")
 
-desc = (fields.get("description") or "")[:1200]
+desc = (fields.get("description") or "")[:1500]
 print(f"Description:\n{desc}\n")
 
-assessment = assess_data_ticket(fields, "DATA-2472")
+assessment = assess_data_ticket(fields, KEY)
 print(f"Conformance: {assessment['conformance']['score']}/5 ({assessment['conformance']['path']})")
 print(f"  Checks: {json.dumps(assessment['conformance']['checks'])}")
 print(f"Service Type: {assessment['service_type']}")
@@ -53,6 +54,8 @@ print()
 rice = calculate_rice(fields)
 print(f"RICE Score: {rice['rice_score']} ({rice['priority_bucket']})")
 print(f"  Reach={rice['reach']} Impact={rice['impact']} Confidence={int(rice['confidence']*100)}% Effort={rice['effort']}")
+if rice.get("platform_enablement_boost"):
+    print("  Platform enablement boost applied")
 print()
 
 rec = recommend_team(fields)
@@ -74,15 +77,14 @@ if ctx.get("asset_names"):
     print(format_asset_context(ctx))
     print()
 
-comments = jira.session.get(jira._url("/issue/DATA-2472/comment")).json()
-dna_refs = []
+comments = jira.session.get(jira._url(f"/issue/{KEY}/comment")).json()
+dna_refs = set()
 for c in comments.get("comments", []):
-    refs = re.findall(r"DNA-\d+", c.get("body", ""))
-    dna_refs.extend(refs)
+    dna_refs.update(re.findall(r"DNA-\d+", c.get("body", "")))
 if dna_refs:
-    print(f"Existing DNA refs: {list(set(dna_refs))}")
+    print(f"Existing DNA refs: {sorted(dna_refs)}")
 print(f"Comments: {len(comments.get('comments', []))}")
 for c in comments.get("comments", [])[:5]:
     author = c.get("author", {}).get("displayName", "")
-    body = c.get("body", "")[:250]
+    body = c.get("body", "")[:300]
     print(f"  [{author}] {body}\n")

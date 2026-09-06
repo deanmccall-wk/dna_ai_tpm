@@ -160,9 +160,12 @@ class AtlanClient:
             return ""
         return f"{self.base_url}/assets/{guid}/overview"
 
-    def search_tables(self, name: str, limit: int = 5) -> list[dict]:
-        """Search for tables and views by name."""
-        return self.search_assets(name, asset_types=["Table", "View", "MaterialisedView", "SnowflakeDynamicTable"], limit=limit)
+    def search_tables(self, name: str, limit: int = 5, snowflake_only: bool = True) -> list[dict]:
+        """Search for tables and views by name. Defaults to Snowflake objects only."""
+        results = self.search_assets(name, asset_types=["Table", "View", "MaterialisedView", "SnowflakeDynamicTable"], limit=limit * 2 if snowflake_only else limit)
+        if snowflake_only:
+            results = [r for r in results if "/snowflake/" in r.get("qualified_name", "")][:limit]
+        return results
 
     def search_models(self, name: str, limit: int = 5) -> list[dict]:
         """Search for dbt models by name."""
