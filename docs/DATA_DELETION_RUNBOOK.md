@@ -2,172 +2,242 @@
 
 ## Overview
 
-This runbook covers the Data Operations steps for processing customer data deletion requests. These tickets originate from SaaS Ops, flow through SSE operators for deletion execution, and require Data Operations to verify redaction and close the ticket.
+This runbook documents the Data Operations process for redacting customer data in the Snowflake and Redshift data warehouses after SSE completes platform deletion.
 
-**Data Operations owns Steps 3, 4, and 5.** The other steps are documented here for context.
+**Entry point:** SSE has completed all 6 platform deletion actions and attached JSON result files to the Jira ticket.
 
-## End-to-End Workflow
-
-| Step | Owner | Description |
-|------|-------|-------------|
-| 1. Intake and verification | SSE Operator (Zachary Hakanson, Dawn Hollis, etc.) | Confirm org/workspace IDs with requester, create Deletion Tracking Document, request CSADMIN access |
-| 2. Deletion actions | SSE Operator | Run 6 ordered actions via Support Viewer (see below) |
-| **3. Field redaction verification** | **Data Operations** | Run verification queries in Snowflake and Redshift, confirm PII redacted |
-| **4. Salesforce verification** | **Data Operations** | Verify deletion reflected in Salesforce account records |
-| **5. Close and notify** | **Data Operations** | Post completion comment, close ticket |
-| 6. Certificate of Destruction | Legal (Clay Stanley) + DocuSign (Sarah Goodall / Lynn Peng) | Only if requested by customer |
-
-## Context: Steps 1-2 (SSE Operator)
-
-### Step 1 — Intake and Verification
-
-The SSE operator:
-- Confirms Org ID and Workspace ID(s) with the requester
-- Creates a Deletion Tracking Document in the Wdesk sandbox
-- Grants the requester viewer permission to the tracking doc
-- Creates a CSADMIN ticket if org/workspace access is needed
-- Links related tickets (SUPP, CSADMIN, OMR)
-
-### Step 2 — Deletion Actions via Support Viewer
-
-The SSE operator runs these actions in order, attaching JSON result files to the ticket:
-
-1. **Force Shred** — Content Management Support: "Shred - Force Shred for Account"
-2. **S16/Filing Deletion** — Filing Data Server: "Delete All Section 16 Data For Account" or "Delete Account Data"
-3. **Workspace Data Deletion** — Cerebral Support Service: "Workspace Data Deletion"
-4. **Group Deletion** — IAM Support Viewer: "Delete all groups in a workspace" or "Delete all groups in an organization"
-5. **Organization Retention Policy** — "Update Organization Retention Policy"
-6. **GES Lifecycle Event** — Support Viewer Service: "Submit Delete Workspace or Organization Lifecycle Event to GES"
-
-**Data Operations picks up after all 6 action result files are attached to the ticket.**
+**Workflow diagram:** See `docs/deletion_workflow.png`
 
 ---
 
-## Step 3 — Field Redaction Verification (Data Operations)
+## Quick Reference — Redaction Checklist
 
-### When to Run
+For every deletion, **all three** org_deletes locations must be updated:
 
-After the SSE operator posts all deletion action result files to the ticket. Look for comments with attached JSON files named like:
-- `Workspace Data Deletion-Results-*.json`
-- `Delete all groups in a workspace-Results-*.json`
-- `Submit Delete Workspace or Organization Lifecycle Event to GES-Results-*.json`
+| # | Location | How |
+|---|----------|-----|
+| 1 | `SILVER_PROD.COMMON.WORKIVA_ORG_DELETES` (Snowflake) | Add row to dbt seed CSV in `dbt_core_models`, merge PR. Nightly deploy or trigger job 908937. |
+| 2 | `SILVER_PROD.ADMIN.WORKIVA_ORG_DELETES` (Snowflake) | Direct INSERT + update [GitHub script](https://github.com/Workiva/enterprise_silver_dbt/blob/master/scripts/SQL/manual_table_ddl/admin_workiva_org_deletes.sql) |
+| 3 | `admin.workiva_org_deletes` (Redshift) | Direct INSERT via psql |
 
-### Finding the Org ID
+Missing any one of these leaves customer names unredacted in downstream views.
 
-The org_id is in the ticket description, typically in a `{code}` block:
+---
+
+## Step 1 — Identify
+
+Extract the org_id and account_id from the ticket and identify all workspaces.
+
+The org_id is in the ticket description or comments:
+
 ```
 Org ID: e4e54d60-463d-4b7d-ab5d-9f6a8a426a5c
 ```
 
-### Step 3a — Identify Workspaces (run first, before deletion actions)
-
-```bash
-source .venv/bin/activate
-python -m deletion.verify_deletion identify DATA-2487              # List workspaces
-python -m deletion.verify_deletion identify DATA-2487 --post       # List and post to Jira
-python -m deletion.verify_deletion identify DATA-2487 --org-id <uuid>  # Manual org_id
-```
-
-This queries Snowflake for all workspaces in the org and posts a confirmation comment listing each workspace ID, name, and current deleted/active status. Use this to confirm scope before deletion actions begin.
-
-### Step 3b — Verify Redaction (run after deletion actions complete)
-
-```bash
-python -m deletion.verify_deletion verify DATA-2487               # Check redaction status
-python -m deletion.verify_deletion verify DATA-2487 --post        # Check and post to Jira
-python -m deletion.verify_deletion verify DATA-2487 --post --close   # Check, post, and close
-```
-
-The script checks each workspace for:
-- `WORKSPACE_NAME = 'REDACTED'` (name has been scrubbed)
-- `DELETED_FLAG = TRUE`
-- `ACTIVE_FLAG = FALSE`
-- A record exists in `WORKIVA_ORG_DELETES` with a `DELETED_DATE`
-
-If all workspaces pass, the verification is complete. If any workspace is not yet redacted, the script reports which ones still need action.
-
-### Manual Verification (if needed)
-
-Run these queries in both **Snowflake** and **Redshift**, substituting the org_id:
+If the account_id is not provided, look it up in Snowflake:
 
 ```sql
--- 1. Workspace records
-SELECT * FROM audit.workiva_workspace
-WHERE organization_id = '<org_id>';
-
--- 2. Organization record
-SELECT * FROM workiva.organization
-WHERE organization_id = '<org_id>';
-
--- 3. Classic account records
-SELECT * FROM audit.wdesk_classic_account
-WHERE organization_id = '<org_id>';
-
--- 4. Workspace solution records
-SELECT * FROM public.workiva_workspace_solution
-WHERE organization_id = '<org_id>';
+SELECT DISTINCT
+    JSON_EXTRACT_PATH_TEXT(organization, 'id') AS org_id,
+    id AS workspace_id,
+    name AS workspace_name
+FROM LAKE_PROD.WORKIVA.workiva_workspace
+WHERE JSON_EXTRACT_PATH_TEXT(organization, 'id') = '<org_id>';
 ```
 
-**What to look for:** All returned rows should show redacted/nulled PII fields. If any fields still contain customer data, escalate back to the SSE operator.
+List all workspaces for the org and post the baseline to the ticket before making changes.
 
-Post query output to the Jira ticket with: **"Field redaction completed."**
+---
 
-## Step 4 — Salesforce Verification (Data Operations)
+## Step 2 — Redact in Snowflake (COMMON)
 
-Verify the deletion is reflected in Salesforce account records:
+This table feeds the primary redaction views (`ADMIN.STG_WORKIVA_WORKSPACE`, `WORKIVA.ORGANIZATION`).
+
+1. Open the `dbt_core_models` repo (dbt Cloud project 396950)
+2. Edit the `workiva_org_deletes` seed CSV — add a new row:
+   ```csv
+   organization_id,account_id,deleted_date
+   <org-uuid>,<account-id>,YYYY-MM-DD
+   ```
+3. Open a PR and get it merged
+4. The nightly dbt Cloud job (908937) will `INSERT OVERWRITE` the table
+5. To apply immediately: trigger job 908937 manually in dbt Cloud
+
+---
+
+## Step 3 — Redact in Snowflake (ADMIN)
+
+This table feeds `WORKIVA.WORKSPACE_SOLUTION` and its downstream Gold-layer views.
+
+Run directly in Snowflake (requires `APP_SILVER_ADMIN_RW_PROD` role):
 
 ```sql
--- Get Salesforce account ID(s) linked to the deleted org
-SELECT DISTINCT swa.id AS id
+INSERT INTO SILVER_PROD.ADMIN.WORKIVA_ORG_DELETES
+  (organization_id, account_id, deleted_date)
+VALUES ('<org-uuid>', '<account-id>', '<YYYY-MM-DD>');
+```
+
+Then update the script file in GitHub for traceability:
+- [admin_workiva_org_deletes.sql](https://github.com/Workiva/enterprise_silver_dbt/blob/master/scripts/SQL/manual_table_ddl/admin_workiva_org_deletes.sql)
+
+---
+
+## Step 4 — Redact in Redshift
+
+This table feeds all Redshift redaction views.
+
+Connect to Redshift:
+
+```bash
+psql "host=redshift.it.workiva.net port=5439 dbname=defaultdb user=<your_admin_user> sslmode=require"
+```
+
+Run the INSERT:
+
+```sql
+INSERT INTO admin.workiva_org_deletes (organization_id, account_id, deleted_date)
+VALUES ('<org-uuid>', '<account-id>', '<YYYY-MM-DD>');
+```
+
+There is no seed or GitHub script for the Redshift table — it is populated exclusively via direct INSERT.
+
+---
+
+## Step 5 — Verify
+
+Run the following queries to confirm redaction and post the results to the Jira ticket as proof.
+
+### Snowflake Verification Queries
+
+```sql
+-- 1. Primary redaction view (fed by COMMON.WORKIVA_ORG_DELETES)
+SELECT WORKSPACE_ID, WORKSPACE_NAME, DELETED_FLAG, ACTIVE_FLAG
+FROM SILVER_PROD.ADMIN.STG_WORKIVA_WORKSPACE
+WHERE ORGANIZATION_ID = '<org_id>';
+
+-- 2. Secondary redaction view (fed by ADMIN.WORKIVA_ORG_DELETES)
+SELECT WORKSPACE_ID, WORKSPACE_NAME, DELETED_FLAG
+FROM SILVER_PROD.WORKIVA.WORKSPACE_SOLUTION
+WHERE ORGANIZATION_ID = '<org_id>';
+
+-- 3. Organization-level redaction
+SELECT ORGANIZATION_ID, ORGANIZATION_NAME, DELETED_FLAG
+FROM SILVER_PROD.WORKIVA.ORGANIZATION
+WHERE ORGANIZATION_ID = '<org_id>';
+
+-- 4. Org deletes record
+SELECT ORGANIZATION_ID, ACCOUNT_ID, DELETED_DATE
+FROM SILVER_PROD.COMMON.WORKIVA_ORG_DELETES
+WHERE ORGANIZATION_ID = '<org_id>';
+```
+
+### Redshift Verification Queries
+
+```sql
+-- 1. Workspace redaction
+SELECT account_resource_id, workspace_name, deleted_flag, active_flag
+FROM audit.workiva_workspace
+WHERE organization_id = '<org_id>';
+
+-- 2. Organization redaction
+SELECT organization_id, organization_name, deleted_flag
+FROM audit.workiva_organization
+WHERE organization_id = '<org_id>';
+
+-- 3. Workspace solution redaction
+SELECT account_resource_id, workspace_name, deleted_flag
+FROM public.workiva_workspace_solution
+WHERE organization_id = '<org_id>';
+
+-- 4. Org deletes record
+SELECT organization_id, account_id, deleted_date
+FROM admin.workiva_org_deletes
+WHERE organization_id = '<org_id>';
+```
+
+### Expected Results
+
+All queries should return:
+- `WORKSPACE_NAME` / `ORGANIZATION_NAME` = `REDACTED`
+- `DELETED_FLAG` = `TRUE`
+- `ACTIVE_FLAG` = `FALSE`
+- A matching row in `workiva_org_deletes`
+
+**If verification fails:** Identify which table is missing the org_id row and repeat the corresponding step (2, 3, or 4).
+
+---
+
+## Step 6 — Close
+
+### Verify Salesforce
+
+```sql
+-- Redshift
+SELECT DISTINCT swa.id AS salesforce_id
 FROM admin.workiva_org_deletes d
-LEFT JOIN public.workiva_workspace ww
-  ON ww.organization_id = d.organization_id
-LEFT JOIN admin.salesforce_wdesk_classic_account swa
-  ON swa.account_resource_id = ww.account_resource_id
-WHERE d.organization_id = '<org_id>';
-
--- Full audit trail
-SELECT *
-FROM admin.workiva_org_deletes d
-LEFT JOIN public.workiva_workspace ww
-  ON ww.organization_id = d.organization_id
-LEFT JOIN admin.salesforce_wdesk_classic_account swa
-  ON swa.account_resource_id = ww.account_resource_id
+LEFT JOIN public.workiva_workspace ww ON ww.organization_id = d.organization_id
+LEFT JOIN admin.salesforce_wdesk_classic_account swa ON swa.account_resource_id = ww.account_resource_id
 WHERE d.organization_id = '<org_id>';
 ```
 
-Post results to the ticket.
+### Post Completion Comment and Close
 
-## Step 5 — Close and Notify (Data Operations)
+Post a comment tagging SaaS Ops, then transition the ticket to Done/Closed.
 
-Post a completion comment tagging the SSE operator and SaaS Ops:
+For parent/child tickets (e.g., Bank of America): close each child first, then the parent.
 
+If the customer requests a Certificate of Destruction, that is handled by Legal (Clay Stanley) and DocuSign — not a Data Operations step.
+
+---
+
+## Reference: How Redaction Works
+
+Redaction is **not automatic**. Views LEFT JOIN against org_deletes tables and replace customer names with `'REDACTED'` when a matching org_id is found.
+
+### Redaction Logic
+
+```sql
+CASE WHEN d.organization_id IS NOT NULL THEN 'REDACTED'
+     ELSE workspace_name
+END AS workspace_name,
+
+d.organization_id IS NOT NULL AS deleted_flag
 ```
-<Customer Name> - <Request Type> is completed.
-[~<sse_operator_username>] [~service_saasops] request is completed.
-```
 
-Then close the ticket (transition to Done/Closed).
+### Snowflake — Org Deletes Tables
 
-### Parent/Child Tickets
+| Table | Source | Populated By |
+|-------|--------|-------------|
+| `SILVER_PROD.COMMON.WORKIVA_ORG_DELETES` | dbt seed in `dbt_core_models` (project 396950, job 908937) | Edit seed CSV, merge PR. Nightly `INSERT OVERWRITE`. |
+| `SILVER_PROD.ADMIN.WORKIVA_ORG_DELETES` | Manual SQL in `enterprise_silver_dbt` | Ad-hoc INSERT via DNA release scripts |
 
-Some customers (e.g., Bank of America, PwC UK) have a parent ticket with multiple child workspace tickets. Process:
-1. Verify and close each **child** workspace ticket first
-2. Once all children are closed, verify and close the **parent** ticket
-3. The parent ticket usually has a pinned comment tracking the status of each child
+Both must be updated for every deletion.
 
-## Context: Step 6 — Certificate of Destruction
+### Snowflake Lineage
 
-Only required if the customer requests a CoD. Not a Data Operations step, but for awareness:
+See `docs/snowflake_deletion_lineage.png`
 
-1. SSE operator fills out the CoD PDF template
-2. Legal (Clay Stanley) reviews and approves
-3. Sarah Goodall / Lynn Peng format in DocuSign for signature
-4. Signed PDF posted to the ticket and delivered to customer via SaaS Ops
+### Redshift — Org Deletes Table
 
-## Jira Field Values
+| Table | Source | Populated By |
+|-------|--------|-------------|
+| `admin.workiva_org_deletes` | No source control (DMADE-1085) | Direct INSERT via psql |
 
-When deletion tickets are moved from DATA to DNA, set:
+### Redshift Lineage
+
+See `docs/redshift_deletion_lineage.png`
+
+### Known Issues (as of Sep 2026)
+
+- The two Snowflake tables are out of sync (COMMON: 86 rows, ADMIN: 85 rows)
+- Some rows have malformed UUIDs and missing account_ids
+- The ADMIN table has not been updated since Nov 2025
+- No automation to keep the three tables in sync
+- The Redshift table has no source control
+
+---
+
+## Reference: Jira Field Values
 
 | Field | Value |
 |-------|-------|
@@ -178,14 +248,20 @@ When deletion tickets are moved from DATA to DNA, set:
 | Epic Link | DNA-2543 (Data Deletion epic) |
 | Priority | Per business priority, default High |
 
-## Edge Cases
+## Reference: Edge Cases
 
-- **Blocked by CSADMIN:** Operator may need org/workspace access before deletion actions can run. Watch for CSADMIN ticket links.
-- **Blocked by Integrated Automations (IA):** Some workspaces have orphaned automations that must be deleted first. Look for IA ticket links.
-- **Blocked by dev PRs:** Occasionally a code fix is needed before force shred works (e.g., timeout issues). Watch for RM/PR links in comments.
-- **Cross-region (EU appspot):** PwC UK tickets use EU infrastructure. The org/workspace IDs and Support Viewer URLs will point to EU endpoints.
-- **Carbon data:** Carbon-specific deletions may require coordination with the Carbon dev team for AWS data removal.
+- **Blocked by CSADMIN:** Operator may need org/workspace access. Watch for CSADMIN ticket links.
+- **Blocked by Integrated Automations (IA):** Orphaned automations must be deleted first.
+- **Cross-region (EU appspot):** PwC UK tickets use EU infrastructure.
+- **Carbon data:** May require coordination with Carbon dev team.
 
-## Backlog
+## Reference: SSE Platform Deletion (Before Data Operations)
 
-There are currently ~27 data deletion tickets in the DATA project that need to be moved to DNA and processed. These arrived after the previous process owner left. Work through them using the standard flow above.
+The SSE operator completes intake (confirm Org ID, create Deletion Tracking Document, link SUPP/CSADMIN tickets) and runs 6 platform deletion actions via Support Viewer (Force Shred, S16/Filing Deletion, Workspace Data Deletion, Group Deletion, Organization Retention Policy, GES Lifecycle Event). Data Operations entry point is when all 6 result files are attached.
+
+---
+
+## Planned Improvements
+
+- **Automated verification script** (`verify_deletion.py`): A CLI tool has been developed in `dna_ai_tpm` that automates the identify and verify steps, posts proof of redaction directly to Jira with SQL queries and results, and can auto-close tickets on pass. Pending rollout to Data Operations users.
+- **Consolidate org_deletes tables**: The three separate tables should be replaced with a single source of truth to eliminate sync issues.

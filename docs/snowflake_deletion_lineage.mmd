@@ -1,0 +1,29 @@
+%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '13px'}}}%%
+flowchart LR
+    RAW["LAKE_PROD.WORKIVA<br/>workiva_workspace<br/><i>raw · unredacted</i>"]
+
+    COMMON["SILVER_PROD.COMMON<br/>WORKIVA_ORG_DELETES<br/><i>dbt seed</i>"]
+    ADMIN_D["SILVER_PROD.ADMIN<br/>WORKIVA_ORG_DELETES<br/><i>manual SQL</i>"]
+
+    STG["SILVER_PROD.ADMIN<br/>STG_WORKIVA_WORKSPACE"]
+    ORG["SILVER_PROD.WORKIVA<br/>ORGANIZATION"]
+    WS_SOL["SILVER_PROD.WORKIVA<br/>WORKSPACE_SOLUTION"]
+
+    CSRD["GOLD_PROD.CPX<br/>DIM_SUSTAINABILITY_CSRD"]
+    RPT["GOLD_PROD.CPX<br/>RPT_SUSTAINABILITY<br/>_CSRD_SOLUTIONS"]
+    GOV["GOLD_PROD.GOV_PROTECTED_CLEANED<br/>WORKATO_ZENDESK<br/>_WORKIVA_WORKSPACE"]
+
+    RAW --> STG
+    COMMON --> STG
+    RAW --> ORG
+    COMMON --> ORG
+    RAW --> WS_SOL
+    ADMIN_D --> WS_SOL
+
+    WS_SOL --> CSRD
+    CSRD --> RPT
+    WS_SOL --> GOV
+
+    style COMMON fill:#fff3e0,stroke:#f5a623
+    style ADMIN_D fill:#fff3e0,stroke:#f5a623
+    style RAW fill:#e8f4fd,stroke:#4a90d9

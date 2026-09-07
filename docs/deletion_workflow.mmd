@@ -1,0 +1,63 @@
+%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '13px'}}}%%
+sequenceDiagram
+    participant Ops as Data Operations
+    participant Jira as Jira Ticket
+    participant SF_C as Snowflake<br/>COMMON.WORKIVA_ORG_DELETES
+    participant SF_A as Snowflake<br/>ADMIN.WORKIVA_ORG_DELETES
+    participant RS as Redshift<br/>admin.workiva_org_deletes
+    participant GH as GitHub
+    participant dbt as dbt Cloud
+
+    Note over Ops: Entry: SSE has completed<br/>platform deletion and<br/>attached 6 JSON result files
+
+    rect rgb(240, 248, 255)
+    Note over Ops: Step 1: Identify
+    Ops->>Jira: Get Org ID + Account ID<br/>from description/comments
+    Ops->>SF_C: verify_deletion identify --post
+    SF_C-->>Ops: Workspace list + status
+    Ops->>Jira: Post workspace baseline
+    end
+
+    rect rgb(255, 243, 224)
+    Note over Ops: Step 2: Redact in Snowflake (COMMON)
+    Ops->>GH: Edit seed CSV in dbt_core_models<br/>Add row: org_id, account_id, date
+    Ops->>GH: Open PR + merge
+    GH->>dbt: Nightly job 908937 runs
+    dbt->>SF_C: INSERT OVERWRITE<br/>all seed rows
+    Note over SF_C: Views now return<br/>REDACTED for this org
+    end
+
+    rect rgb(255, 243, 224)
+    Note over Ops: Step 3: Redact in Snowflake (ADMIN)
+    Ops->>SF_A: INSERT INTO<br/>SILVER_PROD.ADMIN.WORKIVA_ORG_DELETES<br/>(org_id, account_id, date)
+    Ops->>GH: Update admin_workiva_org_deletes.sql<br/>in enterprise_silver_dbt
+    Note over SF_A: WORKSPACE_SOLUTION view<br/>now returns REDACTED
+    end
+
+    rect rgb(252, 228, 236)
+    Note over Ops: Step 4: Redact in Redshift
+    Ops->>RS: psql redshift.it.workiva.net:5439
+    Ops->>RS: INSERT INTO<br/>admin.workiva_org_deletes<br/>(org_id, account_id, date)
+    Note over RS: audit.workiva_workspace<br/>now returns REDACTED
+    end
+
+    rect rgb(240, 248, 255)
+    Note over Ops: Step 5: Verify
+    Ops->>SF_C: verify_deletion verify --snowflake-only
+    SF_C-->>Ops: PASS / FAIL
+    Ops->>RS: verify_deletion verify --redshift-only
+    RS-->>Ops: PASS / FAIL
+
+    alt Any FAIL
+        Ops->>Ops: Identify missing table, repeat step 2/3/4
+    end
+
+    Ops->>Jira: Post proof of redaction<br/>(SQL queries + results + PASS)
+    end
+
+    rect rgb(224, 247, 226)
+    Note over Ops: Step 6: Close
+    Ops->>Jira: Verify Salesforce account records
+    Ops->>Jira: Post completion comment<br/>tag SSE + SaaS Ops
+    Ops->>Jira: Close ticket
+    end

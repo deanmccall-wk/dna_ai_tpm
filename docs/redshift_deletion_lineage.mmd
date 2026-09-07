@@ -1,0 +1,30 @@
+%%{init: {'theme': 'default', 'themeVariables': {'fontSize': '13px'}}}%%
+flowchart LR
+    RAW_RS["mv_spectrum<br/>workiva_workspace<br/><i>Spectrum · unredacted</i>"]
+
+    RS_DEL["admin<br/>workiva_org_deletes<br/><i>manual INSERT</i>"]
+
+    A_WS["audit<br/>workiva_workspace"]
+    A_ORG["audit<br/>workiva_organization"]
+
+    P_WS["public<br/>workiva_workspace"]
+    P_ORG["public<br/>workiva_organization"]
+    P_SOL["public<br/>workiva_workspace_solution"]
+    W_SOL["workiva<br/>workspace_solution"]
+    PO_OLM["product_operations<br/>organization_lifecycle_master"]
+
+    RAW_RS --> A_WS
+    RS_DEL --> A_WS
+    RAW_RS --> A_ORG
+    RS_DEL --> A_ORG
+    RAW_RS --> P_SOL
+    RS_DEL --> P_SOL
+    RAW_RS --> W_SOL
+    RS_DEL --> W_SOL
+    RS_DEL --> PO_OLM
+
+    A_WS --> P_WS
+    A_ORG --> P_ORG
+
+    style RS_DEL fill:#fce4ec,stroke:#e57373
+    style RAW_RS fill:#e8f4fd,stroke:#4a90d9
