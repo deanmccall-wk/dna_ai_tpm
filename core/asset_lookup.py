@@ -20,10 +20,18 @@ TABLE_NAME_PATTERN = re.compile(
     r"\b((?:dim|fct|stg|int|raw|obt|mart)_\w+)\b",
     re.IGNORECASE,
 )
+QUICKSIGHT_DASHBOARD_URL = re.compile(
+    r"quicksight[\w.-]*\.aws\.amazon\.com/sn/dashboards/([\w-]+)",
+    re.IGNORECASE,
+)
+QUICKSIGHT_DATASET_URL = re.compile(
+    r"quicksight[\w.-]*\.aws\.amazon\.com/sn/start/data-sets/([\w-]+)",
+    re.IGNORECASE,
+)
 
 
 def extract_asset_names(text: str) -> list[str]:
-    """Extract probable table/model names from ticket text."""
+    """Extract probable table/model names and QuickSight IDs from ticket text."""
     names = set()
 
     for match in SNOWFLAKE_FQN.finditer(text):
@@ -34,6 +42,12 @@ def extract_asset_names(text: str) -> list[str]:
 
     for match in TABLE_NAME_PATTERN.finditer(text):
         names.add(match.group(1))
+
+    for match in QUICKSIGHT_DASHBOARD_URL.finditer(text):
+        names.add(f"qs-dashboard:{match.group(1)}")
+
+    for match in QUICKSIGHT_DATASET_URL.finditer(text):
+        names.add(f"qs-dataset:{match.group(1)}")
 
     return sorted(names)
 
@@ -47,9 +61,13 @@ def lookup_atlan(asset_names: list[str], atlan=None) -> dict:
     results = {}
     for name in asset_names:
         try:
-            hits = atlan.search_tables(name, limit=3)
-            if not hits:
-                hits = atlan.search_models(name, limit=3)
+            if name.startswith("qs-dashboard:") or name.startswith("qs-dataset:"):
+                qs_id = name.split(":", 1)[1]
+                hits = atlan.search_quicksight(qs_id, limit=3)
+            else:
+                hits = atlan.search_tables(name, limit=3)
+                if not hits:
+                    hits = atlan.search_models(name, limit=3)
             results[name] = hits
         except Exception as e:
             results[name] = [{"error": str(e)}]

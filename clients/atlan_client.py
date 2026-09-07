@@ -170,3 +170,12 @@ class AtlanClient:
     def search_models(self, name: str, limit: int = 5) -> list[dict]:
         """Search for dbt models by name."""
         return self.search_assets(name, asset_types=["DbtModel"], limit=limit)
+
+    def search_quicksight(self, name: str, limit: int = 5) -> list[dict]:
+        """Search for QuickSight dashboards and datasets by name or ID."""
+        return self.search_assets(
+            name,
+            asset_types=["QuickSightDashboard", "QuickSightDataset",
+                         "QuickSightAnalysis", "QuickSightFolder"],
+            limit=limit,
+        )

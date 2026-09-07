@@ -160,9 +160,14 @@ def calculate_rice(fields: dict, effort_override: int = None,
 
 
 def format_rice_comment(rice: dict) -> str:
-    """Format RICE score as a concise Jira comment."""
+    """Format RICE score as a standalone Jira comment (legacy)."""
+    return format_rice_inline(rice)
+
+
+def format_rice_inline(rice: dict) -> str:
+    """Format RICE score as an embeddable Jira wiki table fragment."""
     return (
-        f"*RICE Prioritization Score: {rice['rice_score']}* ({rice['priority_bucket']})\n"
+        f"*RICE Score: {rice['rice_score']}* ({rice['priority_bucket']})\n"
         f"||Factor||Score||Detail||\n"
         f"|Reach|{rice['reach']}|{rice['reach_label']}|\n"
         f"|Impact|{rice['impact']}|{rice['impact_label']}|\n"

@@ -13,15 +13,15 @@ This runbook describes the triage process for incoming Data & Analytics requests
 These rules are non-negotiable. They exist because violations during the initial triage effort caused irreversible damage (permanently closed tickets that should have been assigned).
 
 1. **Never close or transition a ticket without explicit TPM confirmation.** JSM tickets cannot be reopened once Closed.
-2. **Always create a snapshot before any changes.** No exceptions.
+2. **Always create a snapshot before any changes.** No exceptions. The JiraClient enforces this -- writes fail without a snapshot.
 3. **Never auto-advance to the next ticket.** Present findings, wait for direction.
 4. **Self-service is always preferred** over data exports or routing to a team for a data pull.
 5. **Verify the ticket key before posting.** Confirm you are commenting on the correct ticket.
 6. **Review technical statements before posting.** Do not post information you are uncertain about.
-7. **Estimated RICE score goes in a separate comment**, not in the public triage comment.
+7. **RICE score is included in the main triage comment.** Do not post RICE as a separate comment.
 8. **Update the summary** from "General Request" to a descriptive title on every ticket.
 9. **Update the priority** to match the calculated recommendation.
-10. **Link related tickets** when found during investigation.
+10. **Link related tickets** when found during investigation. Auto-linking runs during batch apply.
 
 ## Setup (First Time)
 
@@ -168,7 +168,7 @@ Complete before posting triage comment:
 - [ ] Summary updated from "General Request" to descriptive title
 - [ ] Priority updated to match calculated recommendation
 - [ ] Triage comment includes all applicable items from the 10-Point Standard
-- [ ] Estimated RICE posted as a SEPARATE comment (not in the public triage)
+- [ ] RICE score included inline in the triage comment
 - [ ] Atlan links verified (correct Snowflake objects, not Redshift)
 - [ ] No incorrect or uncertain technical statements
 - [ ] Related tickets linked
@@ -189,10 +189,10 @@ Every triage comment must include all applicable items:
 
 1. **Request summary** -- clear description of what is being asked
 2. **Conformance score** -- X/5 (AUTO or ENRICH) and SLA tier
-3. **Estimated RICE score** -- posted as a SEPARATE internal comment, never in the public triage
+3. **RICE score** -- included inline in the triage comment
 4. **Team recommendation** -- which team should own this and why
 5. **Investigation results** -- what was found in Snowflake, Atlan, QuickSight, or related tickets
-6. **Atlan links** -- for every Snowflake object referenced (table, view, column)
+6. **Atlan links** -- for every Snowflake object referenced (table, view, column). Auto-detected from the description.
 7. **Self-service path** -- if the requester can resolve this themselves, explain how
 8. **Role recommendation** -- if Snowflake access needed, recommend the specific role + [DnA Knowledge Hub](https://wiki.atl.workiva.net/spaces/BT/pages/505678345/Runbooks) link
 9. **Example SQL** -- when it would help the requester get started
@@ -213,6 +213,13 @@ h4. Conformance & Prioritization
 | Jira Priority | <priority> (updated from <old>) |
 | Recommended Team | <team> |
 
+*RICE Score: X.XX* (<bucket>)
+||Factor||Score||Detail||
+|Reach|X|<label>|
+|Impact|X|<label>|
+|Confidence|X%|<label>|
+|Effort|X|<label>|
+
 h4. Investigation
 <tables found, columns checked, Atlan links, related tickets, Snowflake query results>
 
@@ -230,17 +237,9 @@ Thank you,
 Dean
 ```
 
-### Estimated RICE Comment Template (separate comment)
+### Estimated RICE Comment
 
-```
-*Internal -- Estimated RICE Scoring*
-|| Metric || Value ||
-| Conformance | X/5 (AUTO/ENRICH) -- <missing fields if any> |
-| Estimated RICE Score | X.XX (<bucket>) -- Reach=X, Impact=X, Confidence=X%, Effort=X |
-| Calculated Priority | <priority> |
-| Biz Priority | <from intake form> |
-| Recommended Team | <team> |
-```
+RICE is now included inline in the main triage comment (see template above). Do **not** post a separate RICE comment.
 
 ---
 
@@ -441,6 +440,10 @@ PYTHONPATH=$PWD python grooming/repair_dna.py --execute --batch-size 10
 | Feature | How It Works |
 |---------|--------------|
 | Snapshots | **Mandatory** before any modifications. `PYTHONPATH=$PWD python safety/snapshot.py --keys <KEY> --label pre_triage` |
+| Snapshot gate | JiraClient blocks writes if no snapshot exists for the ticket. Use `jira.bypass_snapshot(key)` for just-created tickets. |
+| Dry-run mode | `JiraClient(base_url, pat, dry_run=True)` logs intended writes without executing. |
+| Comment validation | `core/comment_validator.py` checks triage comments for required sections before posting. |
+| Triage checklists | `core/triage_checklist.py` enforces pre-change, pre-post, and post-action checklists programmatically. |
 | Change log | Every action logged to `changes/`. |
 | Rollback (full) | `PYTHONPATH=$PWD python safety/rollback.py restore snapshots/<file>.json --execute` |
 | Rollback (surgical) | `PYTHONPATH=$PWD python safety/rollback.py undo changes/<file>.json --keys DNA-5001 --execute` |

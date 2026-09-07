@@ -485,11 +485,24 @@ def assess_data_ticket(fields: dict, issue_key: str = "") -> dict:
 # SLA comment posting
 # ---------------------------------------------------------------------------
 
-def post_sla_comment(jira: JiraClient, issue_key: str, priority: str) -> dict:
-    comment_body = (
-        f"*Priority:* {priority}\n"
-        f"*SLA:* {SLA_COMMENTS.get(priority, SLA_COMMENTS['Medium'])}"
-    )
+def post_sla_comment(jira: JiraClient, issue_key: str, priority: str,
+                     rice: dict = None, asset_context: dict = None) -> dict:
+    """Post the main triage comment with SLA, optional RICE, and optional asset links."""
+    from core.rice_scoring import format_rice_inline
+    from core.asset_lookup import format_asset_jira_comment
+
+    parts = [
+        f"*Priority:* {priority}",
+        f"*SLA:* {SLA_COMMENTS.get(priority, SLA_COMMENTS['Medium'])}",
+    ]
+    if rice:
+        parts.append("")
+        parts.append(format_rice_inline(rice))
+    if asset_context and asset_context.get("asset_names"):
+        parts.append("")
+        parts.append(format_asset_jira_comment(asset_context))
+
+    comment_body = "\n".join(parts)
     return jira.add_comment(issue_key, comment_body)
 
 
@@ -805,3 +818,53 @@ DELETION_KEYWORDS = [
 def is_deletion_ticket(fields: dict) -> bool:
     text = ((fields.get("summary") or "") + " " + (fields.get("description") or "")).lower()
     return any(kw in text for kw in DELETION_KEYWORDS)
+
+
+# ---------------------------------------------------------------------------
+# Related ticket discovery and linking
+# ---------------------------------------------------------------------------
+
+def find_related_tickets(jira: JiraClient, key: str, fields: dict,
+                         max_results: int = 5) -> list[str]:
+    """Search for related DATA/DNA tickets based on summary keywords.
+
+    Returns list of related ticket keys (excluding the source key).
+    """
+    summary = fields.get("summary", "")
+    # Extract meaningful words (skip short/common words)
+    stop_words = {"the", "a", "an", "to", "for", "in", "of", "and", "or",
+                  "is", "it", "my", "me", "we", "new", "data", "request",
+                  "general", "need", "help", "please", "from", "with"}
+    words = [w for w in summary.split() if len(w) > 2 and w.lower() not in stop_words]
+    if not words:
+        return []
+
+    search_terms = " ".join(words[:5])
+    jql = (
+        f'project IN (DATA, DNA) AND key != "{key}" '
+        f'AND text ~ "{search_terms}" ORDER BY created DESC'
+    )
+    try:
+        results = jira.search(jql, fields=["summary"], max_results=max_results)
+        return [iss["key"] for iss in results.get("issues", [])]
+    except Exception:
+        return []
+
+
+def link_related_tickets(jira: JiraClient, key: str, related_keys: list[str]) -> int:
+    """Create 'Related' links between key and each related_key. Returns count of links created."""
+    linked = 0
+    for related in related_keys:
+        try:
+            jira.session.post(
+                f"{jira.base_url}/rest/api/2/issueLink",
+                json={
+                    "type": {"name": "Related"},
+                    "inwardIssue": {"key": key},
+                    "outwardIssue": {"key": related},
+                },
+            )
+            linked += 1
+        except Exception:
+            pass
+    return linked

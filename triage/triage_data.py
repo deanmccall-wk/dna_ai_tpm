@@ -22,10 +22,12 @@ from core.tpm_workflow import (
     recommend_team, resolve_virtual_team, VIRTUAL_TEAMS, propose_summary,
     prepare_move_instructions, set_dna_fields,
     is_deletion_ticket, DELETION_RUNBOOK_URL,
+    find_related_tickets, link_related_tickets,
 )
 from safety.snapshot import snapshot_from_keys
-from core.rice_scoring import calculate_rice, format_rice_comment
+from core.rice_scoring import calculate_rice, format_rice_comment, format_rice_inline
 from core.asset_lookup import lookup_assets_for_ticket, format_asset_context
+from core.triage_checklist import check_pre_change, check_pre_post, check_post_action
 
 from project_root import PROJECT_ROOT
 
@@ -355,6 +357,13 @@ def apply_plan(jira: JiraClient, plan_path: str):
 
         print(f"\n  [{key}] {action}: {entry.get('summary', '')[:60]}")
 
+        # Pre-change checklist
+        pre_failures = check_pre_change(key, assessment=entry.get("assessment"))
+        if pre_failures:
+            print(f"    PRE-CHECK warnings:")
+            for w in pre_failures:
+                print(f"      - {w}")
+
         try:
             # Rename if a new summary was proposed during planning
             new_summary = entry.get("new_summary")
@@ -364,12 +373,10 @@ def apply_plan(jira: JiraClient, plan_path: str):
 
             if action == "sla":
                 priority = entry.get("priority", "Medium")
-                jira.update_issue(key, {"priority": {"name": priority}})
-                post_sla_comment(jira, key, priority)
                 rice = entry.get("rice")
-                if rice:
-                    jira.add_comment(key, format_rice_comment(rice))
-                print(f"    Set priority={priority}, posted SLA + RICE")
+                jira.update_issue(key, {"priority": {"name": priority}})
+                post_sla_comment(jira, key, priority, rice=rice)
+                print(f"    Set priority={priority}, posted triage comment")
                 results.append({"key": key, "action": "sla", "status": "ok"})
 
             elif action == "handoff":
@@ -398,7 +405,7 @@ def apply_plan(jira: JiraClient, plan_path: str):
 
                 rice = entry.get("rice")
                 if rice:
-                    jira.add_comment(dna_key, format_rice_comment(rice))
+                    post_sla_comment(jira, dna_key, priority, rice=rice)
 
                 print(f"    Fields set on {dna_key} (team={jira_team}, component={component})")
                 results.append({"key": key, "action": "handoff", "status": "ok", "dna_key": dna_key})
@@ -440,6 +447,13 @@ def apply_plan(jira: JiraClient, plan_path: str):
         except Exception as e:
             print(f"    FAIL: {e}")
             results.append({"key": key, "action": action, "status": "error", "error": str(e)})
+
+        # Auto-link related tickets (best-effort)
+        related = entry.get("related_tickets", [])
+        if related:
+            linked = link_related_tickets(jira, key, related)
+            if linked:
+                print(f"    Linked {linked} related ticket(s)")
 
     # Save results
     os.makedirs(CHANGES_DIR, exist_ok=True)
