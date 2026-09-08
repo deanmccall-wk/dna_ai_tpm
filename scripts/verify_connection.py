@@ -2,7 +2,10 @@
 """Verify connectivity to Jira and Confluence, and discover DNA project fields."""
 
 import json
+import os
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import project_root  # noqa: F401
 from clients.config import load_settings
 from clients.jira_client import JiraClient
 from clients.confluence_client import ConfluenceClient

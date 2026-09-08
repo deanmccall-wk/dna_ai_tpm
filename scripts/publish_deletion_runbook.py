@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Publish the Data Deletion Runbook to Confluence."""
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import project_root  # noqa: F401
 from clients.config import load_settings
 from clients.confluence_client import ConfluenceClient
 

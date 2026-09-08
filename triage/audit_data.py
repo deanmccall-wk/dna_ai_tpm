@@ -5,6 +5,8 @@ import json
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import project_root  # noqa: F401
 
 from clients.config import load_settings
 from clients.jira_client import JiraClient

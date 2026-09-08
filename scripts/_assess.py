@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Triage assessment for a DATA ticket."""
 import os, json, re, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import project_root  # noqa: F401
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
