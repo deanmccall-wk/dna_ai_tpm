@@ -34,6 +34,47 @@ CF_EXEC_SPONSOR = "customfield_26721"
 CF_MILESTONE = "customfield_23823"
 CF_REQUEST_TYPE = "customfield_24027"
 
+# ---------------------------------------------------------------------------
+# JSM Service Desk IDs (portal 7, request type 61)
+# ---------------------------------------------------------------------------
+
+SERVICE_DESK_ID = "7"
+REQUEST_TYPE_ID = "61"
+
+SERVICE_TYPE_IDS = {
+    "Build new": "99906560",
+    "Change existing": "99906561",
+    "Business question": "99906562",
+    "Help/troubleshooting": "99906563",
+    "System/DB access": "99906564",
+    "ML/AI": "99906565",
+    "Other": "99906566",
+}
+
+TEAMS_IMPACTED_IDS = {
+    "Entire company": "99906567",
+    "Multiple teams": "99906568",
+    "My team": "99906569",
+    "Just me": "99906570",
+}
+
+BUSINESS_PRIORITY_IDS = {
+    "System Outage / Production Blocker": "99906571",
+    "Fixed Deadline / Upcoming Milestone": "99906572",
+    "Standard Business Operation": "99906573",
+    "Nice-to-have / Backlog": "99906574",
+}
+
+PRIMARY_SOLUTION_IDS = {
+    "ECM": "99906595",
+    "Ingestion": "99906600",
+    "Warehouse": "99906601",
+    "Consumption": "99906602",
+    "Observability": "99906603",
+    "Data Governance": "99906604",
+    "C360": "99906605",
+}
+
 SERVICE_TYPES = {
     "build_new": "I need to build something new (e.g., new data integration, report or dashboard)",
     "change_existing": "I need to make changes to the existing service (e.g., modify report, add columns in Gold data model)",
@@ -420,6 +461,101 @@ def _fallback_title(service_type: str, primary_solutions: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Description-driven field inference
+# ---------------------------------------------------------------------------
+
+_SERVICE_TYPE_KEYWORDS = {
+    "Build new": ["build", "new integration", "new report", "new dashboard", "create new",
+                  "new data", "new pipeline", "set up", "stand up", "net new"],
+    "Change existing": ["change", "modify", "update", "add column", "add field", "alter",
+                        "adjust", "enhance", "extend", "rename", "remove column"],
+    "Business question": ["question", "investigate", "analysis", "understand", "how many",
+                          "what is the", "trend", "insight", "deep dive", "ad hoc"],
+    "Help/troubleshooting": ["broken", "failing", "bug", "fix", "error", "issue", "incident",
+                             "not working", "pipeline failure", "data quality", "wrong data",
+                             "missing data", "stale", "outage"],
+    "System/DB access": ["access", "permission", "role", "grant", "snowflake access",
+                         "database access", "read access", "write access", "credentials"],
+    "ML/AI": ["model", "predict", "classify", "classification", "cortex", "ml", "machine learning",
+              "ai ", "embedding", "llm", "forecast", "anomaly detection", "clustering"],
+}
+
+_PRIMARY_SOLUTION_KEYWORDS = {
+    "Warehouse": ["snowflake", "warehouse", "redshift", "bigquery"],
+    "Ingestion": ["fivetran", "airflow", "ingestion", "pipeline", "etl", "workato",
+                  "data load", "source system", "salesforce", "gainsight", "zendesk",
+                  "workday", "openair", "pitchbook"],
+    "Consumption": ["dashboard", "report", "quicksuite", "quicksight", "streamlit",
+                    "bi tool", "visualization", "cowork"],
+    "ECM": ["ecm"],
+    "C360": ["c360", "customer 360", "customer360"],
+    "Data Governance": ["governance", "atlan", "classification", "lineage", "catalog",
+                        "data quality", "observability"],
+    "Observability": ["monitoring", "alert", "sla", "freshness check"],
+}
+
+_PRIORITY_KEYWORDS = {
+    "System Outage / Production Blocker": ["outage", "down", "blocker", "p0", "production issue",
+                                           "critical", "system down", "broken in prod"],
+    "Fixed Deadline / Upcoming Milestone": ["deadline", "milestone", "by end of", "due date",
+                                            "time-sensitive", "board meeting", "quarter end",
+                                            "eoy", "eoq"],
+    "Nice-to-have / Backlog": ["nice to have", "low priority", "backlog", "when you get a chance",
+                                "no rush", "eventually"],
+}
+
+
+def infer_fields_from_description(summary: str, description: str) -> dict:
+    """Analyze free text and suggest form field values.
+
+    Returns {"service_type": str|None, "business_priority": str|None,
+             "primary_solution": str|None, "reasons": dict}.
+    Each value is a key from the corresponding *_IDS dict, or None.
+    """
+    text = (summary + " " + description).lower()
+    reasons = {}
+
+    # Service type
+    service_type = None
+    best_st_count = 0
+    for label, keywords in _SERVICE_TYPE_KEYWORDS.items():
+        matched = [kw for kw in keywords if kw in text]
+        if len(matched) > best_st_count:
+            best_st_count = len(matched)
+            service_type = label
+            reasons["service_type"] = f"Matched: {', '.join(matched[:3])}"
+
+    # Primary solution
+    primary_solution = None
+    best_ps_count = 0
+    for label, keywords in _PRIMARY_SOLUTION_KEYWORDS.items():
+        matched = [kw for kw in keywords if kw in text]
+        if len(matched) > best_ps_count:
+            best_ps_count = len(matched)
+            primary_solution = label
+            reasons["primary_solution"] = f"Matched: {', '.join(matched[:3])}"
+
+    # Business priority
+    business_priority = None
+    for label, keywords in _PRIORITY_KEYWORDS.items():
+        if any(kw in text for kw in keywords):
+            matched = [kw for kw in keywords if kw in text]
+            business_priority = label
+            reasons["business_priority"] = f"Matched: {', '.join(matched[:2])}"
+            break
+    if business_priority is None:
+        business_priority = "Standard Business Operation"
+        reasons["business_priority"] = "Default (no urgency signals)"
+
+    return {
+        "service_type": service_type,
+        "business_priority": business_priority,
+        "primary_solution": primary_solution,
+        "reasons": reasons,
+    }
+
+
+# ---------------------------------------------------------------------------
 # DATA ticket assessment (form-field based)
 # ---------------------------------------------------------------------------
 
@@ -464,6 +600,10 @@ def assess_data_ticket(fields: dict, issue_key: str = "") -> dict:
     sla = SLA_COMMENTS.get(jira_priority, SLA_COMMENTS["Medium"])
     tier = SERVICE_TYPE_TIERS.get(service_type_val, 2)
 
+    # Lightweight asset name extraction (regex only, no API calls)
+    from core.asset_lookup import extract_asset_names
+    text = (fields.get("summary") or "") + "\n" + (fields.get("description") or "")
+
     return {
         "issue_key": issue_key,
         "summary": fields.get("summary", ""),
@@ -478,6 +618,7 @@ def assess_data_ticket(fields: dict, issue_key: str = "") -> dict:
         "primary_solution": primary_solution_val,
         "sponsor": sponsor_val,
         "milestone": milestone_val,
+        "asset_names": extract_asset_names(text),
     }
 
 
@@ -485,9 +626,12 @@ def assess_data_ticket(fields: dict, issue_key: str = "") -> dict:
 # SLA comment posting
 # ---------------------------------------------------------------------------
 
-def post_sla_comment(jira: JiraClient, issue_key: str, priority: str,
-                     rice: dict = None, asset_context: dict = None) -> dict:
-    """Post the main triage comment with SLA, optional RICE, and optional asset links."""
+def build_triage_comment(priority: str, rice: dict = None,
+                         asset_context: dict = None) -> str:
+    """Build triage comment text without posting.
+
+    Returns Jira wiki markup string ready for validation then posting.
+    """
     from core.rice_scoring import format_rice_inline
     from core.asset_lookup import format_asset_jira_comment
 
@@ -502,7 +646,14 @@ def post_sla_comment(jira: JiraClient, issue_key: str, priority: str,
         parts.append("")
         parts.append(format_asset_jira_comment(asset_context))
 
-    comment_body = "\n".join(parts)
+    return "\n".join(parts)
+
+
+def post_sla_comment(jira: JiraClient, issue_key: str, priority: str,
+                     rice: dict = None, asset_context: dict = None) -> dict:
+    """Post the main triage comment with SLA, optional RICE, and optional asset links."""
+    comment_body = build_triage_comment(priority, rice=rice,
+                                        asset_context=asset_context)
     return jira.add_comment(issue_key, comment_body)
 
 

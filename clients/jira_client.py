@@ -146,6 +146,33 @@ class JiraClient:
                 break
         return all_issues
 
+    # -- Service Desk --
+
+    def create_service_request(self, service_desk_id: str, request_type_id: str,
+                               field_values: dict, on_behalf_of: str = None) -> dict:
+        """Create a JSM service request via the Service Desk API.
+
+        Uses /rest/servicedeskapi/request (not the standard issue API) so that
+        the ticket is created through the portal form with proper field structure.
+        """
+        url = f"{self.base_url}/rest/servicedeskapi/request"
+        payload = {
+            "serviceDeskId": service_desk_id,
+            "requestTypeId": request_type_id,
+            "requestFieldValues": field_values,
+        }
+        if on_behalf_of:
+            payload["raiseOnBehalfOf"] = on_behalf_of
+        if self.dry_run:
+            log.info("[DRY RUN] create_service_request: %s", field_values.get("summary", ""))
+            return {"issueKey": "DRYRUN-0", "issueId": "0", "_links": {"web": "#"}}
+        resp = self.session.post(url, json=payload)
+        resp.raise_for_status()
+        result = resp.json()
+        if "issueKey" in result:
+            self.bypass_snapshot(result["issueKey"])
+        return result
+
     # -- Create metadata --
 
     def get_create_meta(self, project_key: str) -> dict:

@@ -17,7 +17,7 @@ from clients.jira_client import JiraClient
 from core.tpm_workflow import (
     SLA_COMMENTS, BIZ_PRIORITY_TO_JIRA, SERVICE_TYPE_TIERS, SERVICE_TYPES,
     CF_SERVICE_TYPE, CF_BIZ_PRIORITY,
-    assess_data_ticket, post_sla_comment, build_dna_payload,
+    assess_data_ticket, post_sla_comment, build_triage_comment, build_dna_payload,
     create_dna_ticket, close_data_ticket, VALID_TEAMS,
     recommend_team, resolve_virtual_team, VIRTUAL_TEAMS, propose_summary,
     prepare_move_instructions, set_dna_fields,
@@ -42,6 +42,40 @@ def load_audit() -> dict:
         sys.exit(1)
     with open(AUDIT_PATH) as f:
         return json.load(f)
+
+
+def _validate_and_post_comment(
+    jira: JiraClient,
+    issue_key: str,
+    entry: dict,
+    priority: str,
+    rice: dict = None,
+) -> dict | None:
+    """Build triage comment, validate via check_pre_post, post if passing.
+
+    Returns the posted comment dict, or None if blocked and not overridden.
+    """
+    asset_ctx = entry.get("asset_context")
+    comment_text = build_triage_comment(priority, rice=rice,
+                                        asset_context=asset_ctx)
+
+    assessment = {"asset_names": (asset_ctx or {}).get("asset_names", [])}
+    current_summary = entry.get("new_summary") or entry.get("summary", "")
+
+    pre_post_warnings = check_pre_post(
+        issue_key, comment_text,
+        assessment=assessment,
+        current_summary=current_summary,
+    )
+    if pre_post_warnings:
+        print(f"    PRE-POST warnings:")
+        for w in pre_post_warnings:
+            print(f"      - {w}")
+        override = input("    Override and post anyway? [y/N]: ").strip().lower()
+        if override != "y":
+            return None
+
+    return jira.add_comment(issue_key, comment_text)
 
 
 def prompt_choice(prompt: str, options: list[str], default: str = None) -> str:
@@ -112,6 +146,7 @@ def plan_auto_ticket(jira: JiraClient, ticket: dict) -> dict:
         "path": "AUTO",
         "action": action,
         "rice": rice,
+        "asset_context": asset_ctx,
     }
     if new_summary:
         plan_entry["new_summary"] = new_summary
@@ -178,12 +213,13 @@ def plan_enrich_ticket(jira: JiraClient, ticket: dict) -> dict:
     print(f"  Description: {desc}")
 
     # Asset context from Atlan
+    asset_ctx = {}
     try:
         asset_ctx = lookup_assets_for_ticket(fields, use_github=False)
         if asset_ctx.get("asset_names"):
             print(format_asset_context(asset_ctx))
     except Exception:
-        pass
+        asset_ctx = {}
 
     # Propose a better summary if current one is generic
     proposed_summary = propose_summary(fields)
@@ -210,6 +246,7 @@ def plan_enrich_ticket(jira: JiraClient, ticket: dict) -> dict:
         "summary": ticket["summary"],
         "path": "ENRICH",
         "action": action,
+        "asset_context": asset_ctx,
     }
     if new_summary:
         plan_entry["new_summary"] = new_summary
@@ -375,7 +412,10 @@ def apply_plan(jira: JiraClient, plan_path: str):
                 priority = entry.get("priority", "Medium")
                 rice = entry.get("rice")
                 jira.update_issue(key, {"priority": {"name": priority}})
-                post_sla_comment(jira, key, priority, rice=rice)
+                result = _validate_and_post_comment(jira, key, entry, priority, rice=rice)
+                if result is None:
+                    results.append({"key": key, "action": "sla", "status": "blocked"})
+                    continue
                 print(f"    Set priority={priority}, posted triage comment")
                 results.append({"key": key, "action": "sla", "status": "ok"})
 
@@ -405,7 +445,10 @@ def apply_plan(jira: JiraClient, plan_path: str):
 
                 rice = entry.get("rice")
                 if rice:
-                    post_sla_comment(jira, dna_key, priority, rice=rice)
+                    result = _validate_and_post_comment(jira, dna_key, entry, priority, rice=rice)
+                    if result is None:
+                        results.append({"key": key, "action": "handoff", "status": "blocked"})
+                        continue
 
                 print(f"    Fields set on {dna_key} (team={jira_team}, component={component})")
                 results.append({"key": key, "action": "handoff", "status": "ok", "dna_key": dna_key})
@@ -427,7 +470,10 @@ def apply_plan(jira: JiraClient, plan_path: str):
             elif action == "triage":
                 priority = entry.get("priority", "Medium")
                 jira.update_issue(key, {"priority": {"name": priority}})
-                post_sla_comment(jira, key, priority)
+                result = _validate_and_post_comment(jira, key, entry, priority)
+                if result is None:
+                    results.append({"key": key, "action": "triage", "status": "blocked"})
+                    continue
                 print(f"    Manual triage: set priority={priority}, posted SLA")
                 results.append({"key": key, "action": "triage", "status": "ok"})
 
