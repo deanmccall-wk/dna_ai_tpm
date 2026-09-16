@@ -187,7 +187,7 @@ def run_post_creation_triage(jira: JiraClient, issue_key: str) -> None:
 
     # Asset lookup
     try:
-        ctx = lookup_assets_for_ticket(fields, use_github=False)
+        ctx = lookup_assets_for_ticket(fields)
         if ctx.get("asset_names"):
             print(f"\nAsset Lookup:")
             print(format_asset_context(ctx))

@@ -114,7 +114,7 @@ def plan_auto_ticket(jira: JiraClient, ticket: dict) -> dict:
 
     # Asset context from Atlan and GitHub
     try:
-        asset_ctx = lookup_assets_for_ticket(fields, use_github=False)
+        asset_ctx = lookup_assets_for_ticket(fields)
         if asset_ctx.get("asset_names"):
             print(format_asset_context(asset_ctx))
     except Exception:
@@ -215,7 +215,7 @@ def plan_enrich_ticket(jira: JiraClient, ticket: dict) -> dict:
     # Asset context from Atlan
     asset_ctx = {}
     try:
-        asset_ctx = lookup_assets_for_ticket(fields, use_github=False)
+        asset_ctx = lookup_assets_for_ticket(fields)
         if asset_ctx.get("asset_names"):
             print(format_asset_context(asset_ctx))
     except Exception:

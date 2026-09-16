@@ -77,8 +77,8 @@ def lookup_atlan(asset_names: list[str], atlan=None) -> dict:
 def lookup_github(asset_names: list[str], github=None) -> dict:
     """Search GitHub for code and PRs related to each asset name. Returns {name: {...}}."""
     if github is None:
-        from clients.github_mcp_client import GitHubMCPClient
-        github = GitHubMCPClient()
+        from clients.github_client import GitHubClient
+        github = GitHubClient()
 
     results = {}
     try:

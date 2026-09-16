@@ -73,7 +73,7 @@ proposed = propose_summary(fields)
 if proposed:
     print(f"Proposed Summary: {proposed}\n")
 
-ctx = lookup_assets_for_ticket(fields, use_github=False)
+ctx = lookup_assets_for_ticket(fields)
 if ctx.get("asset_names"):
     print("Asset Lookup:")
     print(format_asset_context(ctx))
