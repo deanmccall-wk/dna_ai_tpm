@@ -49,3 +49,23 @@ def test_multiple_assets():
     assert "SILVER_PROD.SALESFORCE.LEAD" in names
     assert "dim_workers" in names
     assert "qs-dashboard:dash-1" in names
+
+
+def test_rpt_prefix():
+    text = "Drop rpt_pipeline_with_signature_products from GOLD_PROD.CPX"
+    names = extract_asset_names(text)
+    assert "rpt_pipeline_with_signature_products" in names
+
+
+def test_additional_dbt_prefixes():
+    cases = {
+        "fact_orders": "The fact_orders table needs updating",
+        "src_accounts": "Check src_accounts in staging",
+        "agg_daily_revenue": "Build agg_daily_revenue for reporting",
+        "snap_orders": "snap_orders captures SCD history",
+        "base_users": "Start with base_users model",
+        "bridge_user_roles": "bridge_user_roles links users to roles",
+    }
+    for expected, text in cases.items():
+        names = extract_asset_names(text)
+        assert expected in names, f"Expected '{expected}' in {names}"

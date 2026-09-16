@@ -17,7 +17,7 @@ SNOWFLAKE_FQN = re.compile(
 )
 DBT_MODEL_REF = re.compile(r"\{\{\s*ref\s*\(\s*['\"](\w+)['\"]\s*\)\s*\}\}")
 TABLE_NAME_PATTERN = re.compile(
-    r"\b((?:dim|fct|stg|int|raw|obt|mart)_\w+)\b",
+    r"\b((?:dim|fct|fact|stg|src|int|raw|obt|mart|rpt|agg|snap|base|bridge)_\w+)\b",
     re.IGNORECASE,
 )
 QUICKSIGHT_DASHBOARD_URL = re.compile(
