@@ -159,11 +159,6 @@ def calculate_rice(fields: dict, effort_override: int = None,
     }
 
 
-def format_rice_comment(rice: dict) -> str:
-    """Format RICE score as a standalone Jira comment (legacy)."""
-    return format_rice_inline(rice)
-
-
 def format_rice_inline(rice: dict) -> str:
     """Format RICE score as an embeddable Jira wiki table fragment."""
     return (

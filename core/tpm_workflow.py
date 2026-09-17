@@ -18,9 +18,6 @@ BIZ_PRIORITY_TO_JIRA = {
     "Nice-to-have / Backlog": "Low",
 }
 
-BIZ_PRIORITY_TO_SLA = {
-    k: SLA_COMMENTS[v] for k, v in BIZ_PRIORITY_TO_JIRA.items()
-}
 
 # ---------------------------------------------------------------------------
 # DATA project custom fields (intake form)
@@ -130,17 +127,6 @@ VALID_COMPONENTS = [
     "C360",
 ]
 
-VALID_EFFORT_POINTS = [1, 2, 3, 5, 8, 13]
-
-EFFORT_POINT_LABELS = {
-    1: "XS (1 day)",
-    2: "S (2-3 days)",
-    3: "M (4-5 days)",
-    5: "L (2 weeks)",
-    8: "XL (1-2 months)",
-    13: "XXL (>2 months)",
-}
-
 COMPONENT_KEYWORD_MAP = {
     "Snowflake": ["Transformation / Compute", "Storage / Lakehouse"],
     "Snowflake Cortex": ["Transformation / Compute"],
@@ -182,13 +168,6 @@ COMPONENT_KEYWORD_MAP = {
     "C360 Product Usage": ["C360"],
 }
 
-REQUIRED_CRITERIA = [
-    "Goal / Service Type",
-    "Stakeholder Impact",
-    "Business Timeline",
-    "Data Domains Involved",
-    "Structured Description",
-]
 
 # ---------------------------------------------------------------------------
 # Team recommendation
@@ -649,14 +628,6 @@ def build_triage_comment(priority: str, rice: dict = None,
     return "\n".join(parts)
 
 
-def post_sla_comment(jira: JiraClient, issue_key: str, priority: str,
-                     rice: dict = None, asset_context: dict = None) -> dict:
-    """Post the main triage comment with SLA, optional RICE, and optional asset links."""
-    comment_body = build_triage_comment(priority, rice=rice,
-                                        asset_context=asset_context)
-    return jira.add_comment(issue_key, comment_body)
-
-
 # ---------------------------------------------------------------------------
 # DNA ticket validation
 # ---------------------------------------------------------------------------
@@ -742,67 +713,8 @@ def check_dna_compliance(issue: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# DNA ticket creation and handoff
+# DNA ticket handoff (manual move + field-set)
 # ---------------------------------------------------------------------------
-
-def build_dna_payload(
-    data_issue: dict,
-    project_key: str = "DNA",
-    issue_type: str = "Story",
-    components: list[str] = None,
-    team: str = "",
-    stakeholders: list[dict] = None,
-    effort_points: int = None,
-    epic_link: str = "",
-    epic_name: str = "",
-    service_type: str = "",
-    extra_fields: dict = None,
-    validate: bool = True,
-) -> dict:
-    fields = data_issue.get("fields", {})
-    summary = fields.get("summary", "")
-    description = fields.get("description", "")
-    priority_name = fields.get("priority", {}).get("name", "Medium")
-
-    payload_fields = {
-        "project": {"key": project_key},
-        "issuetype": {"name": issue_type},
-        "summary": summary,
-        "description": description,
-        "priority": {"name": priority_name},
-    }
-
-    if components:
-        payload_fields["components"] = [{"name": c} for c in components]
-    if team:
-        payload_fields[CF_TEAM] = {"value": team}
-    if stakeholders:
-        payload_fields[CF_STAKEHOLDER] = stakeholders
-    if effort_points is not None:
-        payload_fields["story_points"] = effort_points
-    if epic_link:
-        payload_fields[CF_EPIC_LINK] = epic_link
-    if epic_name:
-        payload_fields[CF_EPIC_NAME] = epic_name
-    if service_type:
-        payload_fields[CF_SERVICE_TYPE] = {"value": service_type}
-    if extra_fields:
-        for k, v in extra_fields.items():
-            if k not in ("reporter", "duedate"):
-                payload_fields[k] = v
-
-    payload = {"fields": payload_fields}
-    if validate:
-        errors = validate_dna_fields(issue_type, payload_fields)
-        if errors:
-            raise ValueError(
-                "DNA payload validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
-            )
-    return payload
-
-
-# Issue types that exist in both DATA and DNA (moveable)
-MOVEABLE_TYPES = {"Epic", "Sub-task", "Task"}
 
 # DATA types that must be converted when moving to DNA
 TYPE_CONVERSION = {
@@ -924,13 +836,6 @@ def set_dna_fields(jira: JiraClient, issue_key: str,
     jira.add_comment(issue_key, "\n".join(comment_lines))
 
     return issue_key
-
-
-def create_dna_ticket(jira: JiraClient, data_issue_key: str, dna_payload: dict) -> str:
-    result = jira.create_issue(dna_payload)
-    dna_key = result["key"]
-    cross_reference(jira, data_issue_key, dna_key)
-    return dna_key
 
 
 def cross_reference(jira: JiraClient, data_key: str, dna_key: str) -> None:

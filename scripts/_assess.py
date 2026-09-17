@@ -56,8 +56,6 @@ print()
 rice = calculate_rice(fields)
 print(f"RICE Score: {rice['rice_score']} ({rice['priority_bucket']})")
 print(f"  Reach={rice['reach']} Impact={rice['impact']} Confidence={int(rice['confidence']*100)}% Effort={rice['effort']}")
-if rice.get("platform_enablement_boost"):
-    print("  Platform enablement boost applied")
 print()
 
 rec = recommend_team(fields)

@@ -22,7 +22,7 @@ from core.tpm_workflow import (
     VALID_TEAMS, VALID_COMPONENTS, COMPONENT_KEYWORD_MAP,
     check_dna_compliance,
 )
-from core.stakeholder_lookup import build_stakeholder_cache, load_cache, lookup_stakeholder
+from core.stakeholder_lookup import build_stakeholder_cache, lookup_stakeholder
 
 from project_root import PROJECT_ROOT
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Upload the triage workflow diagram to the Confluence page and embed it."""
-import os, sys, base64, requests
+import os, sys, requests
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import project_root  # noqa: F401
 from dotenv import load_dotenv

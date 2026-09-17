@@ -155,8 +155,3 @@ def test_close_is_noop(client):
 def test_context_manager(client):
     with client as gh:
         assert gh is client
-
-
-def test_backward_compat_alias():
-    from clients.github_mcp_client import GitHubMCPClient
-    assert GitHubMCPClient is GitHubClient

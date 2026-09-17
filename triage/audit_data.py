@@ -13,7 +13,7 @@ from clients.jira_client import JiraClient
 from core.tpm_workflow import (
     CF_SERVICE_TYPE, CF_TEAMS_IMPACTED, CF_BIZ_PRIORITY,
     CF_PRIMARY_SOLUTION, CF_EXEC_SPONSOR, CF_MILESTONE, CF_REQUEST_TYPE,
-    assess_data_ticket, classify_conformance,
+    assess_data_ticket,
 )
 
 FIELDS = [

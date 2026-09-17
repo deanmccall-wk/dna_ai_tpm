@@ -15,17 +15,15 @@ from datetime import datetime, timezone
 from clients.config import load_settings
 from clients.jira_client import JiraClient
 from core.tpm_workflow import (
-    SLA_COMMENTS, BIZ_PRIORITY_TO_JIRA, SERVICE_TYPE_TIERS, SERVICE_TYPES,
-    CF_SERVICE_TYPE, CF_BIZ_PRIORITY,
-    assess_data_ticket, post_sla_comment, build_triage_comment, build_dna_payload,
-    create_dna_ticket, close_data_ticket, VALID_TEAMS,
+    SLA_COMMENTS, SERVICE_TYPES,
+    assess_data_ticket, build_triage_comment, close_data_ticket, VALID_TEAMS,
     recommend_team, resolve_virtual_team, VIRTUAL_TEAMS, propose_summary,
     prepare_move_instructions, set_dna_fields,
     is_deletion_ticket, DELETION_RUNBOOK_URL,
     find_related_tickets, link_related_tickets,
 )
 from safety.snapshot import snapshot_from_keys
-from core.rice_scoring import calculate_rice, format_rice_comment, format_rice_inline
+from core.rice_scoring import calculate_rice, format_rice_inline
 from core.asset_lookup import lookup_assets_for_ticket, format_asset_context
 from core.triage_checklist import check_pre_change, check_pre_post, check_post_action
 

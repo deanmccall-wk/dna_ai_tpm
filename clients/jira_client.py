@@ -86,13 +86,6 @@ class JiraClient:
         )
         resp.raise_for_status()
 
-    def move_issue(self, key: str, target_project: str, issue_type: str = None) -> None:
-        """Move an issue to another project. Optionally change issue type."""
-        fields = {"project": {"key": target_project}}
-        if issue_type:
-            fields["issuetype"] = {"name": issue_type}
-        self.update_issue(key, fields)
-
     def get_issue_full(self, key: str) -> dict:
         """Get all fields for a ticket (no field filter). Used for snapshots."""
         return self._get(f"/issue/{key}")

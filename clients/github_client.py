@@ -114,7 +114,3 @@ class GitHubClient:
             }
             for item in (data if isinstance(data, list) else [])
         ]
-
-
-# Backward-compatible alias
-GitHubMCPClient = GitHubClient
